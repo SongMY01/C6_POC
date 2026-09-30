@@ -11,6 +11,8 @@ struct StemPlayerView: View {
     @StateObject private var feedbackStore = FeedbackStore()
     @StateObject private var patchStore = PatchStore()
     @State private var showingScore = false
+    /// 트랙(파형) 대신 피드백 목록 화면을 보여줄지.
+    @State private var showingFeedbackBoard = false
     @State private var selectedTrackId: String?
     @State private var recordingTrackId: String?
     @State private var recordingError: String?
@@ -66,6 +68,11 @@ struct StemPlayerView: View {
             && t < region.timelineEnd - TimelineEditing.minLength
     }
 
+    /// 코멘트를 기다리는 피드백 수 — 피드백 버튼에 배지로 보여준다.
+    private var awaitingCommentCount: Int {
+        feedbackStore.items.filter { $0.status == .awaitingComment }.count
+    }
+
     private let headerWidth: CGFloat = 280
     private let laneHeight: CGFloat = 104
     private let rulerHeight: CGFloat = 52
@@ -82,7 +89,17 @@ struct StemPlayerView: View {
                         .environment(\.colorScheme, .light)
                     Divider().overlay(Color.black)
                 }
-                trackArea
+                if showingFeedbackBoard {
+                    FeedbackBoardView(
+                        items: feedbackStore.items,
+                        tracks: controller.tracks,
+                        currentTime: controller.currentTime,
+                        onOpen: { openFeedback($0) },
+                        onCompose: controller.loopRegion == nil ? nil : { activeSheet = .compose }
+                    )
+                } else {
+                    trackArea
+                }
             }
         }
         .background(GB.background)
@@ -115,6 +132,20 @@ struct StemPlayerView: View {
                 Image(systemName: "music.note.list")
             }
             .buttonStyle(GBToolButtonStyle(isOn: showingScore))
+
+            Button { showingFeedbackBoard.toggle() } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: showingFeedbackBoard ? "waveform" : "text.bubble")
+                    if !showingFeedbackBoard, awaitingCommentCount > 0 {
+                        Text("\(awaitingCommentCount)")
+                            .font(.caption.weight(.bold))
+                            .padding(.horizontal, 5)
+                            .background(Capsule().fill(Color.cyan))
+                            .foregroundStyle(.black)
+                    }
+                }
+            }
+            .buttonStyle(GBToolButtonStyle(isOn: showingFeedbackBoard, onColor: .orange))
 
             Spacer(minLength: 8)
 
