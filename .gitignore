@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# 서버 런타임 데이터 (업로드·분리 결과) / 로그
+server/data/
+*.log
+
+# 분석용 오디오·결과물 (용량 큼, 재생성 가능)
+*.m4a
+*.mp3
+*.wav
+separated/
+spectrograms.png
+
+# Xcode — 프로젝트 파일은 app/project.yml에서 xcodegen으로 생성
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+build/
+
+# 로컬 도구 설정
+.claude/settings.local.json

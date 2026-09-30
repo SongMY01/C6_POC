@@ -1,0 +1,45 @@
+name: BandSessionSplitter
+options:
+  bundleIdPrefix: com.poc.bandsession
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  YouTubePlayerKit:
+    url: https://github.com/SvenTiigi/YouTubePlayerKit
+    from: 1.9.0
+
+targets:
+  BandSessionSplitter:
+    type: application
+    platform: iOS
+    sources:
+      - path: BandSessionSplitter
+    dependencies:
+      - package: YouTubePlayerKit
+    info:
+      path: BandSessionSplitter/Info.plist
+      properties:
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+          - UIInterfaceOrientationPortrait
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoads: true
+          NSExceptionDomains:
+            localhost:
+              NSExceptionAllowsInsecureHTTPLoads: true
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        NSMicrophoneUsageDescription: "구간을 재녹음해서 원본과 비교해 들으려면 마이크 접근이 필요합니다."
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "2"
+        PRODUCT_BUNDLE_IDENTIFIER: com.poc.bandsession.BandSessionSplitter
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: true
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
