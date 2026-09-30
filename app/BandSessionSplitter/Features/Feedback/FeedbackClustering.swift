@@ -10,7 +10,8 @@ struct FeedbackCluster: Identifiable {
     var id: UUID { items[0].id }
     var start: TimeInterval { items[0].startTime }
     var isSingle: Bool { items.count == 1 }
-    var isAwaitingComment: Bool { items.contains { $0.isAwaitingComment } }
+    /// 묶음 대표 상태: 코멘트 요청 > 연습 필요 > 통과 (주목할 것 먼저).
+    var status: FeedbackStatus { items.map(\.status).min { $0.displayPriority < $1.displayPriority } ?? .needsPractice }
 
     static func make(_ items: [FeedbackItem], pxPerSec: CGFloat, minSpacing: CGFloat) -> [FeedbackCluster] {
         var clusters: [[FeedbackItem]] = []

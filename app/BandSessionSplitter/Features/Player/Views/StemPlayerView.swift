@@ -296,7 +296,7 @@ struct StemPlayerView: View {
                     }
                     .font(.system(size: 13))
                     .foregroundStyle(cluster.items.contains { $0.id == selectedFeedbackId } ? Color.white
-                                     : (cluster.isAwaitingComment ? Color.cyan : Color.orange))
+                                     : cluster.status.timelineColor)
                     .padding(4)
                 }
                 .buttonStyle(.plain)
@@ -487,10 +487,14 @@ struct StemPlayerView: View {
                             && controller.tracks.first { $0.id == patch.sessionId }?.previewPatch?.id == patch.id
                     },
                     onListen: { listenToReply($0, feedback: item) },
-                    onRecordReply: { recordReply(to: item, sessionId: $0) },
-                    onAttachPatch: { feedbackStore.addReply(.recording(patch: $0), to: item.id) },
-                    onComment: { text, author in feedbackStore.addReply(.comment(text, author: author), to: item.id) },
-                    onDeleteReply: { feedbackStore.deleteReply($0, from: item.id) },
+                    onRecordAttempt: { recordReply(to: item, sessionId: $0) },
+                    onAttachPatch: { feedbackStore.addAttempt(patch: $0, to: item.id) },
+                    onComment: { text, author, attemptId in
+                        feedbackStore.addComment(text, author: author, to: item.id, attemptId: attemptId)
+                    },
+                    onDeleteComment: { feedbackStore.deleteComment($0, from: item.id) },
+                    onDeleteAttempt: { feedbackStore.deleteAttempt($0, from: item.id) },
+                    onSetPassed: { feedbackStore.setPassed($0, for: item.id) },
                     onDeleteFeedback: {
                         deleteFeedback(item)
                         activeSheet = nil
@@ -503,7 +507,7 @@ struct StemPlayerView: View {
 
     /// 답변으로 올릴 수 있는 기존 패치: 받는 세션의 패치 중 피드백 구간과 겹치고 아직 안 올린 것.
     private func attachablePatches(for item: FeedbackItem) -> [Patch] {
-        let attached = Set(item.replies.compactMap(\.patchId))
+        let attached = Set(item.attempts.map(\.patchId))
         return patchStore.patches.filter {
             item.isFor(sessionId: $0.sessionId)
                 && $0.startTime < item.endTime && $0.endTime > item.startTime
@@ -601,7 +605,7 @@ struct StemPlayerView: View {
             controller.setPreviewPatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
             if let feedbackId = replyingToFeedbackId {
                 replyingToFeedbackId = nil
-                feedbackStore.addReply(.recording(patch: patch), to: feedbackId)
+                feedbackStore.addAttempt(patch: patch, to: feedbackId)
                 activeSheet = .thread(feedbackId)
             }
         } catch {

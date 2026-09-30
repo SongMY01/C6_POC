@@ -153,13 +153,19 @@ extension TrackLane {
     /// 피드백 구간 위쪽에 붙는 말풍선. 묶음이면 개수, 녹음 답변이 코멘트를 기다리면 파란색.
     fileprivate func feedbackMarker(_ cluster: FeedbackCluster) -> some View {
         let isSel = cluster.items.contains { $0.id == selectedFeedbackId }
-        let fill: Color = isSel ? .white : (cluster.isAwaitingComment ? .cyan : Color.orange.opacity(0.9))
+        let fill: Color = isSel ? .white : cluster.status.timelineColor
         return Button { onTapFeedbackCluster(cluster) } label: {
             HStack(spacing: 4) {
-                Image(systemName: cluster.isAwaitingComment ? "waveform.badge.mic" : "text.bubble.fill")
+                Image(systemName: {
+                    switch cluster.status {
+                    case .awaitingComment: return "waveform.badge.mic"
+                    case .passed: return "checkmark.circle.fill"
+                    case .needsPractice: return "text.bubble.fill"
+                    }
+                }())
                 if cluster.isSingle {
                     let item = cluster.items[0]
-                    Text(item.isAwaitingComment ? "코멘트 요청 · \(item.text)" : item.text)
+                    Text(item.status == .needsPractice ? item.text : "\(item.status.label) · \(item.text)")
                         .lineLimit(1)
                 } else {
                     Text("피드백 \(cluster.items.count)개")
