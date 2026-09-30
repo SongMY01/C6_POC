@@ -28,7 +28,10 @@ struct TrackLane: View {
     /// 이 세션을 콕 집어 받는 사람으로 지정한 피드백 (전체 대상 피드백은 눈금자 깃발로만 표시).
     let feedbacks: [FeedbackItem]
     let selectedFeedbackId: UUID?
-    let onTapFeedback: (FeedbackItem) -> Void
+    let onTapFeedbackCluster: (FeedbackCluster) -> Void
+
+    /// 말풍선 최대 폭. 이보다 가까운 피드백은 하나로 묶어 "💬 N개"로 보여준다.
+    private let feedbackMarkerWidth: CGFloat = 180
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -49,8 +52,8 @@ struct TrackLane: View {
                 patchClip(patch)
             }
 
-            ForEach(feedbacks) { item in
-                feedbackMarker(item)
+            ForEach(FeedbackCluster.make(feedbacks, pxPerSec: pxPerSec, minSpacing: feedbackMarkerWidth)) { cluster in
+                feedbackMarker(cluster)
             }
         }
         .frame(width: width)
@@ -147,24 +150,30 @@ struct TrackLane: View {
 }
 
 extension TrackLane {
-    /// 피드백 구간 위쪽에 붙는 말풍선 표시. 탭하면 내용을 펼친다.
-    fileprivate func feedbackMarker(_ item: FeedbackItem) -> some View {
-        let isSel = item.id == selectedFeedbackId
-        return Button { onTapFeedback(item) } label: {
+    /// 피드백 구간 위쪽에 붙는 말풍선. 묶음이면 개수, 녹음 답변이 코멘트를 기다리면 파란색.
+    fileprivate func feedbackMarker(_ cluster: FeedbackCluster) -> some View {
+        let isSel = cluster.items.contains { $0.id == selectedFeedbackId }
+        let fill: Color = isSel ? .white : (cluster.isAwaitingComment ? .cyan : Color.orange.opacity(0.9))
+        return Button { onTapFeedbackCluster(cluster) } label: {
             HStack(spacing: 4) {
-                Image(systemName: "text.bubble.fill")
-                Text(item.text)
-                    .lineLimit(1)
-                    .frame(maxWidth: 160, alignment: .leading)
+                Image(systemName: cluster.isAwaitingComment ? "waveform.badge.mic" : "text.bubble.fill")
+                if cluster.isSingle {
+                    let item = cluster.items[0]
+                    Text(item.isAwaitingComment ? "코멘트 요청 · \(item.text)" : item.text)
+                        .lineLimit(1)
+                } else {
+                    Text("피드백 \(cluster.items.count)개")
+                }
             }
             .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(isSel ? Color.black : Color.white)
+            .frame(maxWidth: feedbackMarkerWidth - 24, alignment: .leading)
+            .foregroundStyle(Color.black)
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
-            .background(Capsule().fill(isSel ? Color.white : Color.orange.opacity(0.9)))
+            .background(Capsule().fill(fill))
         }
         .buttonStyle(.plain)
-        .offset(x: CGFloat(item.startTime) * pxPerSec, y: 26)
+        .offset(x: CGFloat(cluster.start) * pxPerSec, y: 26)
     }
 }
 

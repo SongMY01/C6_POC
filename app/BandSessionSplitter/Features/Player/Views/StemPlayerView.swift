@@ -10,7 +10,6 @@ struct StemPlayerView: View {
     @StateObject private var scoreSync = ScoreSyncController()
     @StateObject private var feedbackStore = FeedbackStore()
     @StateObject private var patchStore = PatchStore()
-    @State private var showingFeedbackComposer = false
     @State private var showingScore = false
     @State private var selectedTrackId: String?
     @State private var recordingTrackId: String?
@@ -19,8 +18,28 @@ struct StemPlayerView: View {
     @State private var selectedRegion: RegionSelection?
     /// 선택된 패치 블록 (선택 = 켜져서 들리는 상태). 선택되면 옮기기·자르기가 가능하다.
     @State private var selectedPatch: PatchSelection?
-    /// 하단에 내용을 펼쳐 보여줄 피드백.
+    /// 지금 열려 있는(구간 반복이 잡힌) 피드백 — 깃발 강조용.
     @State private var selectedFeedbackId: UUID?
+    @State private var activeSheet: FeedbackSheet?
+    /// "녹음으로 답하기"로 시작한 녹음이면, 저장할 때 이 피드백 스레드에 올린다.
+    @State private var replyingToFeedbackId: UUID?
+    /// 스레드에서 "듣기"로 켠 답변 녹음 (버튼 표시를 갱신하기 위한 상태).
+    @State private var listeningReplyPatchId: UUID?
+
+    private enum FeedbackSheet: Identifiable {
+        case compose
+        case thread(UUID)
+        /// 겹치거나 붙어 있는 피드백 묶음에서 고르기
+        case picker([UUID])
+
+        var id: String {
+            switch self {
+            case .compose: return "compose"
+            case .thread(let id): return "thread-\(id)"
+            case .picker(let ids): return "picker-\(ids.map(\.uuidString).joined())"
+            }
+        }
+    }
 
     private struct PatchSelection: Equatable {
         let trackId: String
@@ -74,19 +93,8 @@ struct StemPlayerView: View {
         .onChange(of: controller.loopRegion) { _, newRegion in
             selectLatestPatchByDefault(for: newRegion)
         }
-        .sheet(isPresented: $showingFeedbackComposer) {
-            if let region = controller.loopRegion {
-                FeedbackComposerSheet(
-                    timeRange: region,
-                    tracks: controller.tracks,
-                    onSave: { text, targets in
-                        let item = feedbackStore.addFeedback(timeRange: region, text: text, targetSessionIds: targets)
-                        selectedFeedbackId = item.id
-                        showingFeedbackComposer = false
-                    },
-                    onCancel: { showingFeedbackComposer = false }
-                )
-            }
+        .sheet(item: $activeSheet) { sheet in
+            feedbackSheet(sheet)
         }
     }
 
@@ -155,7 +163,7 @@ struct StemPlayerView: View {
 
             Spacer(minLength: 8)
 
-            Button { showingFeedbackComposer = true } label: {
+            Button { activeSheet = .compose } label: {
                 Image(systemName: "square.and.pencil")
             }
             .buttonStyle(GBToolButtonStyle())
@@ -234,7 +242,7 @@ struct StemPlayerView: View {
                                         onTrimRegionEnd: { controller.trimRegionEnd($0, in: track, to: $1) },
                                         feedbacks: feedbackStore.items.filter { $0.targetSessionIds.contains(track.id) },
                                         selectedFeedbackId: selectedFeedbackId,
-                                        onTapFeedback: { openFeedback($0) }
+                                        onTapFeedbackCluster: { openCluster($0) }
                                     )
                                     .frame(height: laneHeight)
                                     .onTapGesture {
@@ -277,18 +285,22 @@ struct StemPlayerView: View {
                 .offset(x: CGFloat(t) * pxPerSec + 4, y: 14)
             }
 
-            ForEach(feedbackStore.items) { item in
-                Button { openFeedback(item) } label: {
-                    Image(systemName: "flag.fill")
-                        .font(.system(size: 13))
-                        .foregroundStyle(item.id == selectedFeedbackId ? Color.white : Color.orange)
-                        .padding(4)
+            // 겹치거나 가까운 피드백은 깃발 하나에 개수를 붙여 묶는다 (확대하면 풀림).
+            ForEach(FeedbackCluster.make(feedbackStore.items, pxPerSec: pxPerSec, minSpacing: 30)) { cluster in
+                Button { openCluster(cluster) } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "flag.fill")
+                        if !cluster.isSingle {
+                            Text("\(cluster.items.count)").font(.system(size: 11, weight: .bold))
+                        }
+                    }
+                    .font(.system(size: 13))
+                    .foregroundStyle(cluster.items.contains { $0.id == selectedFeedbackId } ? Color.white
+                                     : (cluster.isAwaitingComment ? Color.cyan : Color.orange))
+                    .padding(4)
                 }
                 .buttonStyle(.plain)
-                .contextMenu {
-                    Button("피드백 삭제", role: .destructive) { deleteFeedback(item) }
-                }
-                .offset(x: CGFloat(item.startTime) * pxPerSec - 4, y: rulerHeight - 22)
+                .offset(x: CGFloat(cluster.start) * pxPerSec - 4, y: rulerHeight - 22)
             }
         }
         .frame(width: width, height: rulerHeight, alignment: .topLeading)
@@ -327,9 +339,6 @@ struct StemPlayerView: View {
     @ViewBuilder
     private var bottomBanners: some View {
         VStack(spacing: 8) {
-            if let id = selectedFeedbackId, let item = feedbackStore.item(id: id) {
-                feedbackBanner(item)
-            }
             if let selectedRegion, let track = selectedRegionTrack {
                 HStack(spacing: 10) {
                     Text("\(track.displayName) 리전")
@@ -382,11 +391,11 @@ struct StemPlayerView: View {
             if let pending = controller.pendingRecording,
                let track = controller.tracks.first(where: { $0.id == pending.trackId }) {
                 HStack(spacing: 12) {
-                    Text("방금 녹음 — \(track.displayName) \(formatTime(pending.region.lowerBound))~\(formatTime(pending.region.upperBound))")
+                    Text("\(replyingToFeedbackId != nil ? "피드백 답변 녹음" : "방금 녹음") — \(track.displayName) \(formatTime(pending.region.lowerBound))~\(formatTime(pending.region.upperBound))")
                         .font(.subheadline.weight(.semibold))
                     Button("들어보기") { controller.previewPendingRecording() }
                         .buttonStyle(.bordered)
-                    Button("저장") { savePendingRecording(for: track) }
+                    Button(replyingToFeedbackId != nil ? "올리고 코멘트 요청" : "저장") { savePendingRecording(for: track) }
                         .buttonStyle(.borderedProminent)
                     Button("다시 녹음", role: .destructive) { controller.discardPendingRecording() }
                         .buttonStyle(.bordered)
@@ -413,52 +422,9 @@ struct StemPlayerView: View {
         .padding(.bottom, 20)
     }
 
-    private func feedbackBanner(_ item: FeedbackItem) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "text.bubble.fill").foregroundStyle(Color.orange)
-                Text("\(formatTime(item.startTime))~\(formatTime(item.endTime))")
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-                Text("→ \(recipients(of: item))")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.75))
-                Spacer(minLength: 12)
-                Text(item.createdAt, format: .dateTime.month().day().hour().minute())
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-            Text(item.text.isEmpty ? "(내용 없음 — 예전 손글씨 피드백)" : item.text)
-                .font(.body)
-                .foregroundStyle(.white.opacity(item.text.isEmpty ? 0.5 : 0.95))
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 10) {
-                Button {
-                    controller.loopRegion = item.timeRange
-                    controller.isLoopEnabled = true
-                    controller.seek(to: item.startTime)
-                } label: { Label("구간 반복", systemImage: "repeat") }
-                Button(role: .destructive) { deleteFeedback(item) } label: { Label("삭제", systemImage: "trash") }
-                Spacer()
-                Button("닫기") { selectedFeedbackId = nil }
-            }
-            .buttonStyle(GBToolButtonStyle())
-        }
-        .padding(14)
-        .frame(maxWidth: 620)
-        .background(RoundedRectangle(cornerRadius: 14).fill(GB.toolbar))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.orange.opacity(0.6), lineWidth: 1))
-    }
-
-    /// "전체" 또는 "베이스, 드럼".
-    private func recipients(of item: FeedbackItem) -> String {
-        if item.isForAllSessions { return "전체" }
-        let names = controller.tracks.filter { item.targetSessionIds.contains($0.id) }.map(\.displayName)
-        return names.isEmpty ? item.targetSessionIds.joined(separator: ", ") : names.joined(separator: ", ")
-    }
-
     // MARK: - 동작
 
-    /// 피드백 깃발·말풍선 탭: 그 구간을 구간반복으로 잡고 내용을 펼친다.
+    /// 피드백 깃발·말풍선 탭: 그 구간을 구간반복으로 잡고 스레드를 연다.
     private func openFeedback(_ item: FeedbackItem) {
         selectedRegion = nil
         selectedPatch = nil
@@ -466,11 +432,113 @@ struct StemPlayerView: View {
         controller.loopRegion = item.timeRange
         controller.isLoopEnabled = true
         controller.seek(to: item.startTime)
+        activeSheet = .thread(item.id)
+    }
+
+    /// 하나면 바로 열고, 여러 개가 묶여 있으면 목록에서 고르게 한다.
+    private func openCluster(_ cluster: FeedbackCluster) {
+        if cluster.isSingle {
+            openFeedback(cluster.items[0])
+        } else {
+            activeSheet = .picker(cluster.items.map(\.id))
+        }
     }
 
     private func deleteFeedback(_ item: FeedbackItem) {
         if selectedFeedbackId == item.id { selectedFeedbackId = nil }
         feedbackStore.delete(item)
+    }
+
+    // MARK: - 피드백 시트 (작성 / 스레드 / 묶음 목록)
+
+    @ViewBuilder
+    private func feedbackSheet(_ sheet: FeedbackSheet) -> some View {
+        switch sheet {
+        case .compose:
+            if let region = controller.loopRegion {
+                FeedbackComposerSheet(
+                    timeRange: region,
+                    tracks: controller.tracks,
+                    onSave: { text, targets in
+                        let item = feedbackStore.addFeedback(timeRange: region, text: text, targetSessionIds: targets)
+                        selectedFeedbackId = item.id
+                        activeSheet = nil
+                    },
+                    onCancel: { activeSheet = nil }
+                )
+            }
+        case .picker(let ids):
+            FeedbackPickerSheet(
+                items: ids.compactMap { feedbackStore.item(id: $0) },
+                tracks: controller.tracks,
+                onSelect: { openFeedback($0) },
+                onClose: { activeSheet = nil }
+            )
+        case .thread(let id):
+            if let item = feedbackStore.item(id: id) {
+                FeedbackThreadSheet(
+                    item: item,
+                    tracks: controller.tracks,
+                    patchForId: { pid in patchStore.patches.first { $0.id == pid } },
+                    attachablePatches: attachablePatches(for: item),
+                    versionLabel: { "v\(patchStore.versionNumber(of: $0))" },
+                    isPatchPlaying: { patch in
+                        listeningReplyPatchId == patch.id
+                            && controller.tracks.first { $0.id == patch.sessionId }?.previewPatch?.id == patch.id
+                    },
+                    onListen: { listenToReply($0, feedback: item) },
+                    onRecordReply: { recordReply(to: item, sessionId: $0) },
+                    onAttachPatch: { feedbackStore.addReply(.recording(patch: $0), to: item.id) },
+                    onComment: { text, author in feedbackStore.addReply(.comment(text, author: author), to: item.id) },
+                    onDeleteReply: { feedbackStore.deleteReply($0, from: item.id) },
+                    onDeleteFeedback: {
+                        deleteFeedback(item)
+                        activeSheet = nil
+                    },
+                    onClose: { activeSheet = nil }
+                )
+            }
+        }
+    }
+
+    /// 답변으로 올릴 수 있는 기존 패치: 받는 세션의 패치 중 피드백 구간과 겹치고 아직 안 올린 것.
+    private func attachablePatches(for item: FeedbackItem) -> [Patch] {
+        let attached = Set(item.replies.compactMap(\.patchId))
+        return patchStore.patches.filter {
+            item.isFor(sessionId: $0.sessionId)
+                && $0.startTime < item.endTime && $0.endTime > item.startTime
+                && !attached.contains($0.id)
+        }
+    }
+
+    /// 답변 녹음 듣기: 그 패치를 해당 트랙에 켜고 피드백 구간을 처음부터 재생한다. 켜져 있으면 끈다.
+    private func listenToReply(_ patch: Patch, feedback: FeedbackItem) {
+        guard let track = controller.tracks.first(where: { $0.id == patch.sessionId }) else { return }
+        if listeningReplyPatchId == patch.id, track.previewPatch?.id == patch.id {
+            controller.setPreviewPatch(nil, fileURL: nil, for: track)
+            listeningReplyPatchId = nil
+            return
+        }
+        controller.setPreviewPatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
+        listeningReplyPatchId = patch.id
+        controller.loopRegion = feedback.timeRange
+        controller.isLoopEnabled = true
+        controller.seek(to: feedback.startTime)
+        if !controller.isPlaying { controller.play() }
+    }
+
+    /// 피드백 구간을 그 세션으로 바로 녹음 시작. 저장하면 스레드에 올라간다.
+    private func recordReply(to item: FeedbackItem, sessionId: String) {
+        activeSheet = nil
+        replyingToFeedbackId = item.id
+        selectedTrackId = sessionId
+        selectedFeedbackId = item.id
+        controller.loopRegion = item.timeRange
+        // 시트가 내려간 뒤 녹음을 시작해야 준비 시간(카운트인)을 화면에서 볼 수 있다.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            guard !controller.isRecording, controller.pendingRecording == nil else { return }
+            recordTapped()
+        }
     }
 
     private var canRecord: Bool {
@@ -493,6 +561,7 @@ struct StemPlayerView: View {
             } catch {
                 recordingTrackId = nil
                 recordingError = "녹음 시작 실패: \(error.localizedDescription)"
+                replyingToFeedbackId = nil
             }
         }
     }
@@ -530,6 +599,11 @@ struct StemPlayerView: View {
             let patch = try patchStore.addPatch(sessionId: track.id, timeRange: pending.region, tempFileURL: pending.tempURL)
             controller.clearPendingRecording()
             controller.setPreviewPatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
+            if let feedbackId = replyingToFeedbackId {
+                replyingToFeedbackId = nil
+                feedbackStore.addReply(.recording(patch: patch), to: feedbackId)
+                activeSheet = .thread(feedbackId)
+            }
         } catch {
             recordingError = "패치 저장 실패: \(error.localizedDescription)"
         }

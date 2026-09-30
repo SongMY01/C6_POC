@@ -19,7 +19,7 @@ PoC/
 │       │   │   ├── Audio/        #   AVAudioEngine 재생·편집 적용·구간 재녹음, 파형 계산
 │       │   │   ├── Storage/      #   패치(재녹음본)·리전 편집 저장
 │       │   │   └── Views/        #   트랙 화면, 레인, 헤더, 스타일
-│       │   ├── Feedback/         # 구간 텍스트 피드백 + 받는 세션 지정 (저장 + 작성 화면)
+│       │   ├── Feedback/         # 구간 피드백: 받는 세션 지정, 녹음 답변·코멘트 스레드, 겹침 묶음 표시
 │       │   └── Score/            # 악보 PDF 표시, 재생 위치↔페이지 싱크
 │       └── Resources/            # 악보 PDF
 ├── server/                       # FastAPI + Demucs(htdemucs_6s) 분리 서버
