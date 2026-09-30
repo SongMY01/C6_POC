@@ -25,6 +25,11 @@ struct TrackLane: View {
     let onTrimRegionStart: (UUID, TimeInterval) -> Void
     let onTrimRegionEnd: (UUID, TimeInterval) -> Void
 
+    /// 이 세션을 콕 집어 받는 사람으로 지정한 피드백 (전체 대상 피드백은 눈금자 깃발로만 표시).
+    let feedbacks: [FeedbackItem]
+    let selectedFeedbackId: UUID?
+    let onTapFeedback: (FeedbackItem) -> Void
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             (isSelected ? GB.laneSelected : GB.lane)
@@ -42,6 +47,10 @@ struct TrackLane: View {
 
             ForEach(patches) { patch in
                 patchClip(patch)
+            }
+
+            ForEach(feedbacks) { item in
+                feedbackMarker(item)
             }
         }
         .frame(width: width)
@@ -134,6 +143,28 @@ struct TrackLane: View {
                         .padding(4)
                 }
         }
+    }
+}
+
+extension TrackLane {
+    /// 피드백 구간 위쪽에 붙는 말풍선 표시. 탭하면 내용을 펼친다.
+    fileprivate func feedbackMarker(_ item: FeedbackItem) -> some View {
+        let isSel = item.id == selectedFeedbackId
+        return Button { onTapFeedback(item) } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "text.bubble.fill")
+                Text(item.text)
+                    .lineLimit(1)
+                    .frame(maxWidth: 160, alignment: .leading)
+            }
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(isSel ? Color.black : Color.white)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(isSel ? Color.white : Color.orange.opacity(0.9)))
+        }
+        .buttonStyle(.plain)
+        .offset(x: CGFloat(item.startTime) * pxPerSec, y: 26)
     }
 }
 

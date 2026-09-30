@@ -1,7 +1,7 @@
 # 합주 세션 분리 PoC
 
 합주 통합 녹음본을 세션(보컬·드럼·베이스·기타·피아노)별로 분리해서, iPad에서 GarageBand처럼
-트랙별로 듣고 · 구간 피드백을 남기고 · 내 세션만 구간 재녹음(패치)해서 비교해 보는 프로토타입.
+트랙별로 듣고 · 구간마다 특정 세션에게 텍스트 피드백을 남기고 · 내 세션만 구간 재녹음(패치)해서 비교해 보는 프로토타입.
 검증 결과와 결정 사항은 [docs/PoC_요약.md](docs/PoC_요약.md) 참고.
 
 ## 디렉토리 구조
@@ -11,7 +11,7 @@ PoC/
 ├── app/                          # iPad SwiftUI 앱 (xcodegen)
 │   ├── project.yml               # Xcode 프로젝트 정의 — .xcodeproj는 여기서 생성 (git 미포함)
 │   └── BandSessionSplitter/
-│       ├── App/                  # 앱 진입점, 루트 탭, 세션 분리 흐름 화면, Info.plist
+│       ├── App/                  # 앱 진입점, 세션 분리 흐름 화면, Info.plist
 │       ├── Features/
 │       │   ├── Separation/       # 분리 서버 클라이언트 + 업로드→분리→다운로드 흐름
 │       │   ├── Player/           # 멀티트랙 플레이어 (GarageBand식 트랙 뷰)
@@ -19,10 +19,8 @@ PoC/
 │       │   │   ├── Audio/        #   AVAudioEngine 재생·편집 적용·구간 재녹음, 파형 계산
 │       │   │   ├── Storage/      #   패치(재녹음본)·리전 편집 저장
 │       │   │   └── Views/        #   트랙 화면, 레인, 헤더, 스타일
-│       │   ├── Feedback/         # 구간 손글씨 피드백 (저장 + 작성 화면)
-│       │   ├── Score/            # 악보 PDF 표시·렌더링, 재생 위치↔페이지 싱크
-│       │   ├── Handwriting/      # 손글씨 탭 (악보 위 필기 저장/복원)
-│       │   └── YouTubeSync/      # 유튜브 싱크 탭
+│       │   ├── Feedback/         # 구간 텍스트 피드백 + 받는 세션 지정 (저장 + 작성 화면)
+│       │   └── Score/            # 악보 PDF 표시, 재생 위치↔페이지 싱크
 │       └── Resources/            # 악보 PDF
 ├── server/                       # FastAPI + Demucs(htdemucs_6s) 분리 서버
 │   └── data/                     #   업로드·분리 결과 (git 미포함)

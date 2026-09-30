@@ -23,7 +23,6 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-YOUTUBE_EMBED_HTML = Path(__file__).resolve().parent / "youtube_embed.html"
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -138,13 +137,3 @@ async def get_stem(job_id: str, stem_name: str):
 @app.get("/health")
 async def health():
     return {"ok": True, "model": MODEL_NAME}
-
-
-@app.get("/youtube_embed.html")
-async def youtube_embed():
-    """
-    YouTube 연동 POC용 정적 페이지.
-    앱이 loadHTMLString으로 가짜 baseURL을 주는 대신, 진짜 HTTP 오리진(우리 서버)에서
-    서빙되는 페이지를 로드하게 해서 iframe embed 재생이 되는지 확인한다.
-    """
-    return FileResponse(YOUTUBE_EMBED_HTML, media_type="text/html")

@@ -5,19 +5,12 @@ options:
     iOS: "17.0"
   createIntermediateGroups: true
 
-packages:
-  YouTubePlayerKit:
-    url: https://github.com/SvenTiigi/YouTubePlayerKit
-    from: 1.9.0
-
 targets:
   BandSessionSplitter:
     type: application
     platform: iOS
     sources:
       - path: BandSessionSplitter
-    dependencies:
-      - package: YouTubePlayerKit
     info:
       path: BandSessionSplitter/App/Info.plist
       properties:

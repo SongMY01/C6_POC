@@ -1,10 +1,8 @@
 import SwiftUI
-import PDFKit
-import PencilKit
 
 /// GarageBand 트랙 뷰 형태의 멀티트랙 플레이어.
 /// 위: 트랜스포트 바 / 왼쪽: 트랙 헤더(뮤트·솔로·볼륨) / 오른쪽: 눈금자 + 트랙별 파형 레인 + 재생헤드.
-/// 구간반복은 노란 영역, 피드백은 눈금자 위 깃발, 재녹음 패치는 레인 위 블록으로 표시한다.
+/// 구간반복은 노란 영역, 피드백은 눈금자 위 깃발(받는 세션 레인에는 말풍선), 재녹음 패치는 레인 위 블록으로 표시한다.
 struct StemPlayerView: View {
     @ObservedObject var controller: StemPlayerController
     let onReset: () -> Void
@@ -12,7 +10,6 @@ struct StemPlayerView: View {
     @StateObject private var scoreSync = ScoreSyncController()
     @StateObject private var feedbackStore = FeedbackStore()
     @StateObject private var patchStore = PatchStore()
-    @State private var pdfDocument: PDFDocument?
     @State private var showingFeedbackComposer = false
     @State private var showingScore = false
     @State private var selectedTrackId: String?
@@ -22,6 +19,8 @@ struct StemPlayerView: View {
     @State private var selectedRegion: RegionSelection?
     /// 선택된 패치 블록 (선택 = 켜져서 들리는 상태). 선택되면 옮기기·자르기가 가능하다.
     @State private var selectedPatch: PatchSelection?
+    /// 하단에 내용을 펼쳐 보여줄 피드백.
+    @State private var selectedFeedbackId: UUID?
 
     private struct PatchSelection: Equatable {
         let trackId: String
@@ -51,10 +50,6 @@ struct StemPlayerView: View {
     private let laneHeight: CGFloat = 104
     private let rulerHeight: CGFloat = 52
 
-    private var currentPage: Int {
-        scoreSync.pageIndex(for: controller.currentTime)
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             transportBar
@@ -74,7 +69,6 @@ struct StemPlayerView: View {
         .environment(\.colorScheme, .dark)
         .overlay(alignment: .bottom) { bottomBanners }
         .onAppear {
-            loadPDFIfNeeded()
             if selectedTrackId == nil { selectedTrackId = controller.tracks.first?.id }
         }
         .onChange(of: controller.loopRegion) { _, newRegion in
@@ -83,11 +77,11 @@ struct StemPlayerView: View {
         .sheet(isPresented: $showingFeedbackComposer) {
             if let region = controller.loopRegion {
                 FeedbackComposerSheet(
-                    page: currentPage,
                     timeRange: region,
-                    document: pdfDocument,
-                    onSave: { drawing in
-                        feedbackStore.addFeedback(page: currentPage, timeRange: region, drawing: drawing)
+                    tracks: controller.tracks,
+                    onSave: { text, targets in
+                        let item = feedbackStore.addFeedback(timeRange: region, text: text, targetSessionIds: targets)
+                        selectedFeedbackId = item.id
                         showingFeedbackComposer = false
                     },
                     onCancel: { showingFeedbackComposer = false }
@@ -237,7 +231,10 @@ struct StemPlayerView: View {
                                         },
                                         onMoveRegion: { controller.moveRegion($0, in: track, to: $1) },
                                         onTrimRegionStart: { controller.trimRegionStart($0, in: track, to: $1) },
-                                        onTrimRegionEnd: { controller.trimRegionEnd($0, in: track, to: $1) }
+                                        onTrimRegionEnd: { controller.trimRegionEnd($0, in: track, to: $1) },
+                                        feedbacks: feedbackStore.items.filter { $0.targetSessionIds.contains(track.id) },
+                                        selectedFeedbackId: selectedFeedbackId,
+                                        onTapFeedback: { openFeedback($0) }
                                     )
                                     .frame(height: laneHeight)
                                     .onTapGesture {
@@ -281,19 +278,15 @@ struct StemPlayerView: View {
             }
 
             ForEach(feedbackStore.items) { item in
-                Button {
-                    controller.loopRegion = item.timeRange
-                    controller.isLoopEnabled = true
-                    controller.seek(to: item.startTime)
-                } label: {
+                Button { openFeedback(item) } label: {
                     Image(systemName: "flag.fill")
                         .font(.system(size: 13))
-                        .foregroundStyle(Color.orange)
+                        .foregroundStyle(item.id == selectedFeedbackId ? Color.white : Color.orange)
                         .padding(4)
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
-                    Button("피드백 삭제", role: .destructive) { feedbackStore.delete(item) }
+                    Button("피드백 삭제", role: .destructive) { deleteFeedback(item) }
                 }
                 .offset(x: CGFloat(item.startTime) * pxPerSec - 4, y: rulerHeight - 22)
             }
@@ -334,6 +327,9 @@ struct StemPlayerView: View {
     @ViewBuilder
     private var bottomBanners: some View {
         VStack(spacing: 8) {
+            if let id = selectedFeedbackId, let item = feedbackStore.item(id: id) {
+                feedbackBanner(item)
+            }
             if let selectedRegion, let track = selectedRegionTrack {
                 HStack(spacing: 10) {
                     Text("\(track.displayName) 리전")
@@ -417,7 +413,65 @@ struct StemPlayerView: View {
         .padding(.bottom, 20)
     }
 
+    private func feedbackBanner(_ item: FeedbackItem) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "text.bubble.fill").foregroundStyle(Color.orange)
+                Text("\(formatTime(item.startTime))~\(formatTime(item.endTime))")
+                    .font(.subheadline.monospacedDigit().weight(.semibold))
+                Text("→ \(recipients(of: item))")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.75))
+                Spacer(minLength: 12)
+                Text(item.createdAt, format: .dateTime.month().day().hour().minute())
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            Text(item.text.isEmpty ? "(내용 없음 — 예전 손글씨 피드백)" : item.text)
+                .font(.body)
+                .foregroundStyle(.white.opacity(item.text.isEmpty ? 0.5 : 0.95))
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                Button {
+                    controller.loopRegion = item.timeRange
+                    controller.isLoopEnabled = true
+                    controller.seek(to: item.startTime)
+                } label: { Label("구간 반복", systemImage: "repeat") }
+                Button(role: .destructive) { deleteFeedback(item) } label: { Label("삭제", systemImage: "trash") }
+                Spacer()
+                Button("닫기") { selectedFeedbackId = nil }
+            }
+            .buttonStyle(GBToolButtonStyle())
+        }
+        .padding(14)
+        .frame(maxWidth: 620)
+        .background(RoundedRectangle(cornerRadius: 14).fill(GB.toolbar))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.orange.opacity(0.6), lineWidth: 1))
+    }
+
+    /// "전체" 또는 "베이스, 드럼".
+    private func recipients(of item: FeedbackItem) -> String {
+        if item.isForAllSessions { return "전체" }
+        let names = controller.tracks.filter { item.targetSessionIds.contains($0.id) }.map(\.displayName)
+        return names.isEmpty ? item.targetSessionIds.joined(separator: ", ") : names.joined(separator: ", ")
+    }
+
     // MARK: - 동작
+
+    /// 피드백 깃발·말풍선 탭: 그 구간을 구간반복으로 잡고 내용을 펼친다.
+    private func openFeedback(_ item: FeedbackItem) {
+        selectedRegion = nil
+        selectedPatch = nil
+        selectedFeedbackId = item.id
+        controller.loopRegion = item.timeRange
+        controller.isLoopEnabled = true
+        controller.seek(to: item.startTime)
+    }
+
+    private func deleteFeedback(_ item: FeedbackItem) {
+        if selectedFeedbackId == item.id { selectedFeedbackId = nil }
+        feedbackStore.delete(item)
+    }
 
     private var canRecord: Bool {
         selectedTrackId != nil && controller.loopRegion != nil && controller.pendingRecording == nil
@@ -478,13 +532,6 @@ struct StemPlayerView: View {
             controller.setPreviewPatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
         } catch {
             recordingError = "패치 저장 실패: \(error.localizedDescription)"
-        }
-    }
-
-    private func loadPDFIfNeeded() {
-        guard pdfDocument == nil else { return }
-        if let url = Bundle.main.url(forResource: scoreSync.song.pdfResourceName, withExtension: "pdf") {
-            pdfDocument = PDFDocument(url: url)
         }
     }
 }

@@ -105,10 +105,9 @@
 
 ```
 PoC/
-├── server/          # FastAPI + Demucs 분리 서버, YouTube 임베드 페이지(현재 미사용)
-├── app/              # SwiftUI iPad 앱 (3개 탭: 세션분리 / 유튜브싱크 / 손글씨)
-│                      #   - 세션분리 탭: 구간 반복 재생 포함
-│                      #   - 유튜브싱크 탭: YouTubePlayerKit 기반
+├── server/          # FastAPI + Demucs 분리 서버
+├── app/              # SwiftUI iPad 앱 (세션 분리 → 멀티트랙 플레이어)
+│                      #   - 유튜브싱크·손글씨 탭은 2026-10-01 제거 (검증 완료 후 범위 정리)
 ├── research/         # 분리 품질 분석 스크립트 + 테스트용 실제 합주 녹음본(input.m4a 등)
 └── docs/             # 이 문서
 ```
