@@ -19,7 +19,7 @@ targets:
     dependencies:
       - package: YouTubePlayerKit
     info:
-      path: BandSessionSplitter/Info.plist
+      path: BandSessionSplitter/App/Info.plist
       properties:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations~ipad:

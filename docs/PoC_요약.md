@@ -109,8 +109,10 @@ PoC/
 ├── app/              # SwiftUI iPad 앱 (3개 탭: 세션분리 / 유튜브싱크 / 손글씨)
 │                      #   - 세션분리 탭: 구간 반복 재생 포함
 │                      #   - 유튜브싱크 탭: YouTubePlayerKit 기반
-└── input.m4a 등      # 테스트용 실제 합주 녹음본
+├── research/         # 분리 품질 분석 스크립트 + 테스트용 실제 합주 녹음본(input.m4a 등)
+└── docs/             # 이 문서
 ```
+자세한 앱 폴더 구성은 루트 [README.md](../README.md) 참고.
 
 ## 다음에 확인할 것
 
