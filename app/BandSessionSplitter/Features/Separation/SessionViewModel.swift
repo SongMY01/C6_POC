@@ -11,30 +11,82 @@ enum FlowState: Equatable {
     case failed(String)
 }
 
-/// 시뮬레이터는 이 Mac 위에서 직접 돌기 때문에 127.0.0.1로 접근해야 한다.
-/// 192.168.x.x 같은 Mac 자신의 LAN IP로 접근하면 라우터의 hairpin NAT 문제로
-/// 요청이 아예 도달하지 못하고 타임아웃 날 수 있다(실제로 겪은 문제).
-/// 실기기는 반대로 127.0.0.1이 기기 자신을 가리키므로 Mac의 LAN IP가 필요하다.
-/// 매번 수동으로 주소를 바꾸다 틀리는 걸 막기 위해 빌드 대상에 따라 기본값을 분기한다.
-///
-/// 주의: Mac의 LAN IP는 Wi-Fi를 다시 연결하거나 네트워크를 옮기면 바뀔 수 있다.
-/// 실기기에서 "The request timed out"이 나면 제일 먼저 이 IP가 지금도 맞는지
-/// (Mac에서 `ipconfig getifaddr en0`) 확인할 것 — 앱 안에서는 ⚙️ 버튼으로 바로 수정 가능.
+/// 분리 서버 후보. 시뮬레이터는 이 Mac 위에서 직접 돌기 때문에 127.0.0.1로 접근해야 한다
+/// (Mac 자신의 LAN IP로 접근하면 라우터의 hairpin NAT 문제로 타임아웃 날 수 있음 — 실제로 겪음).
+/// 실기기는 Mac의 LAN IP가 필요한데, 개발하는 네트워크마다 Mac IP가 달라서
+/// 후보를 모두 두고 분리 시작 전에 /health에 응답하는 쪽을 자동으로 고른다.
+/// 새 장소가 생기면 여기에 추가 (Mac에서 `ipconfig getifaddr en0`로 IP 확인).
+struct ServerCandidate: Identifiable {
+    let name: String
+    let url: String
+    var id: String { url }
+}
+
 #if targetEnvironment(simulator)
-private let defaultServerURL = "http://127.0.0.1:8756"
+let serverCandidates = [ServerCandidate(name: "이 Mac", url: "http://127.0.0.1:8756")]
 #else
-private let defaultServerURL = "http://10.141.52.89:8756"
+let serverCandidates = [
+    ServerCandidate(name: "집 Wi-Fi", url: "http://192.168.0.5:8756"),
+    ServerCandidate(name: "학교", url: "http://10.141.52.89:8756"),
+]
 #endif
 
 @MainActor
 final class SessionViewModel: ObservableObject {
     @Published var state: FlowState = .idle
-    @Published var serverURLText: String = defaultServerURL
+    @Published private(set) var serverURLText: String = serverCandidates[0].url
+    /// 설정 화면에 보여줄 서버 연결 상태 ("학교 서버 연결됨" 등).
+    @Published private(set) var serverStatus: String?
+    /// ⚙️에서 주소를 직접 입력했으면 자동 선택을 하지 않는다.
+    @Published private(set) var isManualServer = false
     @Published var playerController = StemPlayerController()
 
     private var pickedFileURL: URL?
     private var service: SeparationService {
-        SeparationService(baseURL: URL(string: serverURLText) ?? URL(string: defaultServerURL)!)
+        SeparationService(baseURL: URL(string: serverURLText) ?? URL(string: serverCandidates[0].url)!)
+    }
+
+    // MARK: - 서버 주소
+
+    func setManualServer(_ url: String) {
+        serverURLText = url
+        isManualServer = true
+        serverStatus = "직접 입력한 주소 사용"
+    }
+
+    /// 후보들 중 지금 응답하는 서버를 찾아 고른다. 모두 응답이 없으면 주소는 그대로 둔다.
+    func detectServer() async {
+        isManualServer = false
+        serverStatus = "서버 찾는 중…"
+        if let found = await Self.firstReachable(serverCandidates) {
+            serverURLText = found.url
+            serverStatus = "\(found.name) 서버 연결됨"
+        } else {
+            serverStatus = "응답하는 서버 없음 — 서버가 켜져 있는지, 같은 Wi-Fi인지 확인"
+        }
+    }
+
+    /// 후보 모두에 동시에 /health를 보내 가장 먼저 응답한 후보를 돌려준다.
+    private static func firstReachable(_ candidates: [ServerCandidate]) async -> ServerCandidate? {
+        await withTaskGroup(of: ServerCandidate?.self) { group in
+            for candidate in candidates {
+                group.addTask {
+                    guard let url = URL(string: candidate.url)?.appendingPathComponent("health") else { return nil }
+                    var request = URLRequest(url: url)
+                    request.timeoutInterval = 2
+                    guard let (_, response) = try? await URLSession.shared.data(for: request),
+                          (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+                    return candidate
+                }
+            }
+            for await result in group {
+                if let result {
+                    group.cancelAll()
+                    return result
+                }
+            }
+            return nil
+        }
     }
 
     func fileWasPicked(_ url: URL) {
@@ -53,6 +105,7 @@ final class SessionViewModel: ObservableObject {
         state = .uploading
         Task {
             do {
+                if !isManualServer { await detectServer() }
                 let svc = service
                 let jobId = try await svc.uploadRecording(fileURL: fileURL)
                 state = .separating

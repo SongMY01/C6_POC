@@ -126,13 +126,39 @@ struct ContentView: View {
     private var serverSettingsSheet: some View {
         NavigationStack {
             Form {
-                Section("분리 서버 주소") {
-                    TextField("http://127.0.0.1:8756", text: $viewModel.serverURLText)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Text("시뮬레이터: 127.0.0.1 그대로 사용\n실기기: 같은 Wi-Fi의 Mac IP로 변경")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Section {
+                    if let status = viewModel.serverStatus {
+                        Text(status).font(.subheadline)
+                    }
+                    Button("자동으로 찾기") { Task { await viewModel.detectServer() } }
+                } header: {
+                    Text("분리 서버")
+                } footer: {
+                    Text("분리를 시작할 때마다 아래 후보 중 응답하는 서버를 자동으로 고릅니다.")
+                }
+                Section("후보") {
+                    ForEach(serverCandidates) { candidate in
+                        Button {
+                            viewModel.setManualServer(candidate.url)
+                        } label: {
+                            HStack {
+                                Text(candidate.name)
+                                Spacer()
+                                Text(candidate.url).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                if viewModel.serverURLText == candidate.url {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                }
+                Section("직접 입력") {
+                    TextField("http://127.0.0.1:8756", text: Binding(
+                        get: { viewModel.serverURLText },
+                        set: { viewModel.setManualServer($0) }
+                    ))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
                 }
             }
             .navigationTitle("서버 설정")
@@ -142,7 +168,8 @@ struct ContentView: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
+        .task { if !viewModel.isManualServer { await viewModel.detectServer() } }
     }
 }
 
