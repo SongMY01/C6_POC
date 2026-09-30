@@ -32,11 +32,10 @@ final class StemTrack: ObservableObject, Identifiable {
     /// 조각마다 따로 두고 "기기 시계의 정확한 시각"으로 미리 예약해 두면, 조각 경계에서
     /// 아무것도 다시 시작할 필요가 없어 다른 트랙에 영향이 없다.
     var originalNodes: [AVAudioPlayerNode] = []
-    /// 재녹음 패치 전용 플레이어. 패치(마이크 녹음)는 원본 스템과 채널 수·샘플레이트가 달라서
-    /// 원본 플레이어에 그대로 넣으면 형식이 안 맞는다. 패치 형식으로 따로 연결하고 볼륨도 따로 둔다.
-    let patchNode = AVAudioPlayerNode()
-    var patchConnectedFormat: AVAudioFormat?
-    var allNodes: [AVAudioPlayerNode] { originalNodes + [patchNode] }
+    /// 켜진 패치마다 하나씩 두는 전용 플레이어. 패치(마이크 녹음)는 원본 스템과 채널 수·샘플레이트가
+    /// 달라서 원본 플레이어에 그대로 넣으면 형식이 안 맞는다. 패치 파일 형식으로 따로 연결하고 볼륨도 따로 둔다.
+    var patchPlayers: [UUID: PatchPlayer] = [:]
+    var allNodes: [AVAudioPlayerNode] { originalNodes + patchPlayers.values.map(\.node) }
 
     /// 편집 가능한 리전 목록 (타임라인 순). 처음엔 파일 전체 하나.
     @Published var regions: [TrackRegion]
@@ -54,9 +53,18 @@ final class StemTrack: ObservableObject, Identifiable {
         didSet { applyVolume() }
     }
 
-    /// 지금 켜져서 들리는 패치. nil이면 원본만 재생.
-    @Published var previewPatch: Patch?
-    var previewFile: AVAudioFile?
+    /// 지금 켜져서 들리는 패치들 (시간 순). 비어 있으면 원본만 재생.
+    /// 서로 다른 구간의 패치는 함께 켤 수 있고(예: 통과한 수정 여러 개), 구간이 겹치는 패치는
+    /// 동시에 켤 수 없다 — 하나를 켜면 겹치는 쪽이 꺼진다.
+    @Published var activePatches: [Patch] = []
+
+    func activePatch(id: UUID) -> Patch? {
+        activePatches.first { $0.id == id }
+    }
+
+    func isActive(_ patchId: UUID) -> Bool {
+        activePatch(id: patchId) != nil
+    }
 
     init?(definition: StemDefinition, fileURL: URL) {
         guard let file = try? AVAudioFile(forReading: fileURL) else { return nil }
@@ -72,11 +80,21 @@ final class StemTrack: ObservableObject, Identifiable {
 
     func applyVolume() {
         for node in originalNodes { node.volume = isMuted ? 0 : volume }
-        patchNode.volume = isMuted ? 0 : patchVolume
+        for player in patchPlayers.values { player.node.volume = isMuted ? 0 : patchVolume }
     }
 
     func stopAll() {
         allNodes.forEach { $0.stop() }
+    }
+}
+
+/// 켜진 패치 하나를 재생하는 자원: 녹음 파일 + 전용 플레이어.
+final class PatchPlayer {
+    let file: AVAudioFile
+    let node = AVAudioPlayerNode()
+
+    init(file: AVAudioFile) {
+        self.file = file
     }
 }
 

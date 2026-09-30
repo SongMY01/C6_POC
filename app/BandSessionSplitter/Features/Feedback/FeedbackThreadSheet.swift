@@ -2,8 +2,10 @@ import SwiftUI
 
 /// 피드백 하나의 진행 화면: 피드백 → 1차 시도(녹음 + 코멘트) → 2차 시도 → … → 통과.
 ///
-/// 시도의 녹음은 PatchStore의 패치를 가리킨다. "듣기"를 누르면 그 패치를 해당 트랙에 켜서
-/// 다른 세션과 함께 피드백 구간을 재생하므로, 원래 연주와 고친 연주를 바로 비교할 수 있다.
+/// 시도의 녹음은 PatchStore의 패치를 가리킨다. "비교해서 듣기"에서 원본/각 시도를 고르면
+/// 그 버전을 해당 트랙에 끼워 다른 세션과 함께 피드백 구간을 반복 재생한다 — 재생을 멈추지 않고
+/// 바꿔 끼우므로 원본 ↔ 최신, 이전 시도 ↔ 최신을 바로바로 비교할 수 있다.
+/// "통과"하면 그 시도의 녹음이 곡에 반영된다(채택: 곡을 열 때 기본으로 켜짐).
 /// 최신 시도만 펼쳐 두고 이전 시도는 접어서, 여러 번 주고받아도 화면이 길어지지 않게 한다.
 struct FeedbackThreadSheet: View {
     let item: FeedbackItem
@@ -13,8 +15,10 @@ struct FeedbackThreadSheet: View {
     /// 시도로 올릴 수 있는 기존 패치들 (받는 세션의 패치, 최신 순).
     let attachablePatches: [Patch]
     let versionLabel: (Patch) -> String
-    let isPatchPlaying: (Patch) -> Bool
-    let onListen: (Patch) -> Void
+    /// 비교 듣기에서 지금 그 세션 트랙에 끼워진 시도의 패치 id (nil = 원본)
+    let comparisonSelection: (_ sessionId: String) -> UUID?
+    /// 원본(nil) 또는 특정 시도의 패치로 바꿔 끼우고 피드백 구간을 반복 재생
+    let onCompare: (_ sessionId: String, _ patch: Patch?) -> Void
     let onRecordAttempt: (_ sessionId: String) -> Void
     let onAttachPatch: (Patch) -> Void
     let onComment: (_ text: String, _ author: String, _ attemptId: UUID?) -> Void
@@ -43,6 +47,7 @@ struct FeedbackThreadSheet: View {
                 feedbackSection
 
                 if !item.attempts.isEmpty {
+                    compareSection
                     Section("시도 \(item.attempts.count)회") {
                         ForEach(Array(item.attempts.enumerated()), id: \.element.id) { index, attempt in
                             attemptView(attempt, number: index + 1, isLatest: attempt.id == latestAttempt?.id)
@@ -54,7 +59,7 @@ struct FeedbackThreadSheet: View {
                     Section {
                         Button("다시 열기 (추가 연습 필요)") { onSetPassed(nil) }
                     } footer: {
-                        Text("다시 녹음해서 올려도 자동으로 다시 열립니다.")
+                        Text("통과한 시도의 녹음이 곡에 반영되어 있습니다. 다시 열면 원본으로 돌아갑니다. 새 시도를 올리면 피드백이 다시 열리지만, 새 시도가 통과할 때까지는 지금 반영된 녹음이 유지됩니다.")
                     }
                 }
 
@@ -166,15 +171,7 @@ struct FeedbackThreadSheet: View {
                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if let patch {
-                Button {
-                    onListen(patch)
-                } label: {
-                    Label(isPatchPlaying(patch) ? "끄기" : "듣기",
-                          systemImage: isPatchPlaying(patch) ? "speaker.slash.fill" : "play.fill")
-                }
-                .buttonStyle(.bordered)
-            } else {
+            if patch == nil {
                 Text("삭제된 녹음").font(.caption).foregroundStyle(.secondary)
             }
             if isLatest && item.status != .passed {
@@ -203,6 +200,39 @@ struct FeedbackThreadSheet: View {
         }
         .contextMenu {
             Button("코멘트 삭제", role: .destructive) { onDeleteComment(comment.id) }
+        }
+    }
+
+    // MARK: 비교해서 듣기
+
+    /// 시도를 올린 세션마다: [원본 | 1차 | 2차 …] 중 하나를 골라 그 버전으로 피드백 구간을 듣는다.
+    private var compareSection: some View {
+        let sessions = item.attempts.map(\.sessionId).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        return Section {
+            ForEach(sessions, id: \.self) { sessionId in
+                let attempts = item.attempts.filter { $0.sessionId == sessionId && patchForId($0.patchId) != nil }
+                VStack(alignment: .leading, spacing: 8) {
+                    if sessions.count > 1 {
+                        Text(FeedbackPeople.name(of: sessionId, tracks: tracks)).font(.subheadline.weight(.semibold))
+                    }
+                    Picker("비교", selection: Binding<UUID?>(
+                        get: { comparisonSelection(sessionId) },
+                        set: { id in onCompare(sessionId, id.flatMap(patchForId)) }
+                    )) {
+                        Text("원본").tag(UUID?.none)
+                        ForEach(attempts) { attempt in
+                            let n = item.attemptNumber(of: attempt.id) ?? 0
+                            Text(item.passedAttemptId == attempt.id ? "\(n)차 ✓" : "\(n)차").tag(UUID?.some(attempt.patchId))
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding(.vertical, 4)
+            }
+        } header: {
+            Text("비교해서 듣기")
+        } footer: {
+            Text("고르면 그 버전으로 바꿔 끼워 피드백 구간을 반복 재생합니다. 닫으면 곡에 반영된 버전으로 돌아갑니다.")
         }
     }
 

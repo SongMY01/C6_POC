@@ -118,8 +118,9 @@ struct TrackLane: View {
     /// 탭하면 켜고 선택, 선택된 패치는 리전처럼 끌어서 옮기고 양끝 손잡이로 자른다.
     private func patchClip(_ stored: Patch) -> some View {
         // 켜져 있는 패치는 컨트롤러가 가진 최신 위치로 그린다.
-        let isActive = track.previewPatch?.id == stored.id
-        let patch = isActive ? (track.previewPatch ?? stored) : stored
+        let active = track.activePatch(id: stored.id)
+        let isActive = active != nil
+        let patch = active ?? stored
         let isSel = patch.id == selectedPatchId
         return TimelineClip(
             start: patch.startTime, duration: patch.duration, pxPerSec: pxPerSec,
@@ -139,7 +140,8 @@ struct TrackLane: View {
                                 lineWidth: isSel ? 3 : (isActive ? 2 : 1))
                 )
                 .overlay(alignment: .bottomLeading) {
-                    Text(isActive ? "\(versionLabel(patch)) ●" : versionLabel(patch))
+                    // 라벨은 저장된 패치 기준 (채택 여부 등은 저장본에만 최신 값이 있다)
+                    Text(isActive ? "\(versionLabel(stored)) ●" : versionLabel(stored))
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(1)

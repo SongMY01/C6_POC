@@ -13,6 +13,9 @@ struct Patch: Identifiable, Codable, Equatable {
     var createdAt: Date
     /// 녹음 파일의 몇 초 지점부터 startTime에 재생할지. 패치 왼쪽 끝을 잘라내면 늘어난다.
     var sourceStart: TimeInterval = 0
+    /// 곡에 반영된(채택된) 버전인지. 피드백에서 "통과"한 시도의 패치가 채택되고,
+    /// 채택된 패치는 곡을 열 때 기본으로 켜진다. 같은 세션에서 구간이 겹치는 채택 패치는 하나뿐.
+    var isAdopted: Bool = false
 
     var timeRange: ClosedRange<TimeInterval> {
         startTime...endTime
@@ -30,6 +33,7 @@ extension Patch {
         endTime = try c.decode(TimeInterval.self, forKey: .endTime)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         sourceStart = try c.decodeIfPresent(TimeInterval.self, forKey: .sourceStart) ?? 0
+        isAdopted = try c.decodeIfPresent(Bool.self, forKey: .isAdopted) ?? false
     }
 }
 
@@ -83,11 +87,37 @@ final class PatchStore: ObservableObject {
         return patch
     }
 
-    /// 옮기기·자르기로 바뀐 위치를 저장한다 (녹음 파일은 그대로).
-    func update(_ patch: Patch) {
+    /// 옮기기·자르기로 바뀐 위치만 저장한다 (녹음 파일·채택 여부는 그대로).
+    func updatePlacement(_ patch: Patch) {
         guard let i = patches.firstIndex(where: { $0.id == patch.id }) else { return }
-        patches[i] = patch
+        patches[i].startTime = patch.startTime
+        patches[i].endTime = patch.endTime
+        patches[i].sourceStart = patch.sourceStart
         persistManifest()
+    }
+
+    func patch(id: UUID) -> Patch? {
+        patches.first { $0.id == id }
+    }
+
+    /// 곡에 반영(채택)하거나 해제한다. 채택하면 같은 세션에서 구간이 겹치는 다른 채택 패치는 해제된다.
+    func setAdopted(_ adopted: Bool, patchId: UUID) {
+        guard let i = patches.firstIndex(where: { $0.id == patchId }) else { return }
+        if adopted {
+            let target = patches[i]
+            for j in patches.indices where j != i && patches[j].isAdopted
+                && patches[j].sessionId == target.sessionId
+                && patches[j].startTime < target.endTime && patches[j].endTime > target.startTime {
+                patches[j].isAdopted = false
+            }
+        }
+        patches[i].isAdopted = adopted
+        persistManifest()
+    }
+
+    /// 세션별 채택된 패치들.
+    func adoptedPatches(sessionId: String) -> [Patch] {
+        patches.filter { $0.sessionId == sessionId && $0.isAdopted }
     }
 
     func delete(_ patch: Patch) {

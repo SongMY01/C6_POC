@@ -23,8 +23,9 @@ struct StemPlayerView: View {
     @State private var activeSheet: FeedbackSheet?
     /// "녹음으로 답하기"로 시작한 녹음이면, 저장할 때 이 피드백 스레드에 올린다.
     @State private var replyingToFeedbackId: UUID?
-    /// 스레드에서 "듣기"로 켠 답변 녹음 (버튼 표시를 갱신하기 위한 상태).
-    @State private var listeningReplyPatchId: UUID?
+    /// 피드백 화면에서 원본/시도 비교로 패치 구성을 임시로 바꾼 트랙들.
+    /// 시트를 닫으면 이 트랙들을 곡에 반영된(채택된) 버전으로 되돌린다.
+    @State private var comparedTrackIds: Set<String> = []
 
     private enum FeedbackSheet: Identifiable {
         case compose
@@ -89,11 +90,14 @@ struct StemPlayerView: View {
         .overlay(alignment: .bottom) { bottomBanners }
         .onAppear {
             if selectedTrackId == nil { selectedTrackId = controller.tracks.first?.id }
+            activateAdoptedPatches()
         }
         .onChange(of: controller.loopRegion) { _, newRegion in
             selectLatestPatchByDefault(for: newRegion)
         }
-        .sheet(item: $activeSheet) { sheet in
+        .sheet(item: $activeSheet, onDismiss: {
+            restoreComparedTracks()
+        }) { sheet in
             feedbackSheet(sheet)
         }
     }
@@ -225,12 +229,12 @@ struct StemPlayerView: View {
                                         isLoopEnabled: controller.isLoopEnabled,
                                         isSelected: selectedTrackId == track.id,
                                         patches: patchStore.patches(sessionId: track.id),
-                                        versionLabel: { "패치 v\(patchStore.versionNumber(of: $0))" },
+                                        versionLabel: { "\($0.isAdopted ? "✓ " : "")패치 v\(patchStore.versionNumber(of: $0))" },
                                         onTapPatch: { tapPatch($0, for: track) },
                                         selectedPatchId: selectedPatch?.trackId == track.id ? selectedPatch?.patchId : nil,
-                                        onMovePatch: { if let p = controller.movePreviewPatch(of: track, to: $0) { patchStore.update(p) } },
-                                        onTrimPatchStart: { if let p = controller.trimPreviewPatchStart(of: track, to: $0) { patchStore.update(p) } },
-                                        onTrimPatchEnd: { if let p = controller.trimPreviewPatchEnd(of: track, to: $0) { patchStore.update(p) } },
+                                        onMovePatch: { t in editSelectedPatch(in: track) { id in controller.movePatch(id, of: track, to: t) } },
+                                        onTrimPatchStart: { t in editSelectedPatch(in: track) { id in controller.trimPatchStart(id, of: track, to: t) } },
+                                        onTrimPatchEnd: { t in editSelectedPatch(in: track) { id in controller.trimPatchEnd(id, of: track, to: t) } },
                                         selectedRegionId: selectedRegion?.trackId == track.id ? selectedRegion?.regionId : nil,
                                         onSelectRegion: { id in
                                             selectedTrackId = track.id
@@ -367,17 +371,23 @@ struct StemPlayerView: View {
             }
             if let selectedPatch,
                let track = controller.tracks.first(where: { $0.id == selectedPatch.trackId }),
-               let patch = track.previewPatch, patch.id == selectedPatch.patchId {
+               let patch = track.activePatch(id: selectedPatch.patchId) {
+                let isAdopted = patchStore.patch(id: patch.id)?.isAdopted == true
                 HStack(spacing: 10) {
                     Text("\(track.displayName) 패치 v\(patchStore.versionNumber(of: patch)) · \(formatTime(patch.startTime))~\(formatTime(patch.endTime))")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.8))
                     Button {
-                        controller.setPreviewPatch(nil, fileURL: nil, for: track)
+                        patchStore.setAdopted(!isAdopted, patchId: patch.id)
+                    } label: {
+                        Label(isAdopted ? "반영 해제" : "곡에 반영", systemImage: isAdopted ? "checkmark.seal.fill" : "checkmark.seal")
+                    }
+                    Button {
+                        controller.deactivatePatch(patch.id, for: track)
                         self.selectedPatch = nil
                     } label: { Label("끄기", systemImage: "speaker.slash") }
                     Button(role: .destructive) {
-                        controller.setPreviewPatch(nil, fileURL: nil, for: track)
+                        controller.deactivatePatch(patch.id, for: track)
                         patchStore.delete(patch)
                         self.selectedPatch = nil
                     } label: { Label("삭제", systemImage: "trash") }
@@ -482,11 +492,8 @@ struct StemPlayerView: View {
                     patchForId: { pid in patchStore.patches.first { $0.id == pid } },
                     attachablePatches: attachablePatches(for: item),
                     versionLabel: { "v\(patchStore.versionNumber(of: $0))" },
-                    isPatchPlaying: { patch in
-                        listeningReplyPatchId == patch.id
-                            && controller.tracks.first { $0.id == patch.sessionId }?.previewPatch?.id == patch.id
-                    },
-                    onListen: { listenToReply($0, feedback: item) },
+                    comparisonSelection: { sessionId in comparisonSelection(for: item, sessionId: sessionId) },
+                    onCompare: { sessionId, patch in compare(sessionId: sessionId, patch: patch, feedback: item) },
                     onRecordAttempt: { recordReply(to: item, sessionId: $0) },
                     onAttachPatch: { feedbackStore.addAttempt(patch: $0, to: item.id) },
                     onComment: { text, author, attemptId in
@@ -494,7 +501,7 @@ struct StemPlayerView: View {
                     },
                     onDeleteComment: { feedbackStore.deleteComment($0, from: item.id) },
                     onDeleteAttempt: { feedbackStore.deleteAttempt($0, from: item.id) },
-                    onSetPassed: { feedbackStore.setPassed($0, for: item.id) },
+                    onSetPassed: { setPassed($0, feedback: item) },
                     onDeleteFeedback: {
                         deleteFeedback(item)
                         activeSheet = nil
@@ -515,20 +522,78 @@ struct StemPlayerView: View {
         }
     }
 
-    /// 답변 녹음 듣기: 그 패치를 해당 트랙에 켜고 피드백 구간을 처음부터 재생한다. 켜져 있으면 끈다.
-    private func listenToReply(_ patch: Patch, feedback: FeedbackItem) {
-        guard let track = controller.tracks.first(where: { $0.id == patch.sessionId }) else { return }
-        if listeningReplyPatchId == patch.id, track.previewPatch?.id == patch.id {
-            controller.setPreviewPatch(nil, fileURL: nil, for: track)
-            listeningReplyPatchId = nil
-            return
+    /// 비교 듣기에서 지금 선택된 것: 그 세션 트랙에 켜진 시도 패치 id (없으면 nil = 원본).
+    private func comparisonSelection(for feedback: FeedbackItem, sessionId: String) -> UUID? {
+        guard let track = controller.tracks.first(where: { $0.id == sessionId }) else { return nil }
+        return feedback.attempts.first { $0.sessionId == sessionId && track.isActive($0.patchId) }?.patchId
+    }
+
+    /// 원본(patch == nil) 또는 특정 시도로 바꿔 끼우고, 피드백 구간을 반복 재생한다.
+    /// 재생 중이면 그 트랙만 다시 맞추므로 끊기지 않고 바로 비교된다.
+    private func compare(sessionId: String, patch: Patch?, feedback: FeedbackItem) {
+        guard let track = controller.tracks.first(where: { $0.id == sessionId }) else { return }
+        comparedTrackIds.insert(sessionId)
+        if let patch {
+            controller.activatePatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
+        } else {
+            for active in track.activePatches
+            where active.startTime < feedback.endTime && active.endTime > feedback.startTime {
+                controller.deactivatePatch(active.id, for: track)
+            }
         }
-        controller.setPreviewPatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
-        listeningReplyPatchId = patch.id
-        controller.loopRegion = feedback.timeRange
-        controller.isLoopEnabled = true
-        controller.seek(to: feedback.startTime)
-        if !controller.isPlaying { controller.play() }
+        if controller.loopRegion != feedback.timeRange || !controller.isPlaying {
+            controller.loopRegion = feedback.timeRange
+            controller.isLoopEnabled = true
+            controller.seek(to: feedback.startTime)
+            if !controller.isPlaying { controller.play() }
+        }
+    }
+
+    /// 통과 처리하면 그 시도의 녹음을 곡에 반영(채택)하고 바로 켠다.
+    /// 다시 열면 반영했던 녹음을 해제하고 원본으로 돌린다.
+    private func setPassed(_ attemptId: UUID?, feedback: FeedbackItem) {
+        if let previous = feedback.attempts.first(where: { $0.id == feedback.passedAttemptId }) {
+            patchStore.setAdopted(false, patchId: previous.patchId)
+            if let track = controller.tracks.first(where: { $0.id == previous.sessionId }) {
+                controller.deactivatePatch(previous.patchId, for: track)
+            }
+        }
+        feedbackStore.setPassed(attemptId, for: feedback.id)
+        guard let attempt = feedback.attempts.first(where: { $0.id == attemptId }),
+              let patch = patchStore.patch(id: attempt.patchId),
+              let track = controller.tracks.first(where: { $0.id == attempt.sessionId }) else { return }
+        patchStore.setAdopted(true, patchId: patch.id)
+        controller.activatePatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
+    }
+
+    /// 곡에 반영된(채택된) 패치를 모두 켠다. 곡을 열 때와 비교 듣기를 마쳤을 때 호출한다.
+    private func activateAdoptedPatches() {
+        for track in controller.tracks {
+            for patch in patchStore.adoptedPatches(sessionId: track.id) {
+                controller.activatePatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
+            }
+        }
+    }
+
+    /// 비교 듣기로 바꿨던 트랙을 곡 기본 상태로: 채택 안 된 패치는 끄고, 채택된 패치를 켠다.
+    private func restoreComparedTracks() {
+        for track in controller.tracks where comparedTrackIds.contains(track.id) {
+            let adopted = patchStore.adoptedPatches(sessionId: track.id)
+            for active in track.activePatches where !adopted.contains(where: { $0.id == active.id }) {
+                controller.deactivatePatch(active.id, for: track)
+            }
+            for patch in adopted {
+                controller.activatePatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
+            }
+        }
+        comparedTrackIds.removeAll()
+    }
+
+    /// 선택된 패치 블록을 옮기거나 자른 뒤, 바뀐 위치를 저장한다.
+    private func editSelectedPatch(in track: StemTrack, _ edit: (UUID) -> Patch?) {
+        guard let selectedPatch, selectedPatch.trackId == track.id,
+              let changed = edit(selectedPatch.patchId) else { return }
+        patchStore.updatePlacement(changed)
     }
 
     /// 피드백 구간을 그 세션으로 바로 녹음 시작. 저장하면 스레드에 올라간다.
@@ -573,14 +638,12 @@ struct StemPlayerView: View {
     /// 패치 블록 탭: 꺼져 있으면 켜고 선택(옮기기·자르기 가능), 선택된 걸 다시 탭하면 끈다.
     private func tapPatch(_ patch: Patch, for track: StemTrack) {
         if selectedPatch?.patchId == patch.id {
-            controller.setPreviewPatch(nil, fileURL: nil, for: track)
+            controller.deactivatePatch(patch.id, for: track)
             selectedPatch = nil
             return
         }
-        if track.previewPatch?.id != patch.id {
-            controller.setPreviewPatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
-        }
-        guard track.previewPatch?.id == patch.id else { return }
+        controller.activatePatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
+        guard track.isActive(patch.id) else { return }
         selectedTrackId = track.id
         selectedRegion = nil
         selectedPatch = PatchSelection(trackId: track.id, patchId: patch.id)
@@ -591,9 +654,12 @@ struct StemPlayerView: View {
     private func selectLatestPatchByDefault(for region: ClosedRange<TimeInterval>?) {
         guard let region else { return }
         for track in controller.tracks {
-            guard track.previewPatch == nil else { continue }
+            let hasPatchHere = track.activePatches.contains {
+                $0.startTime < region.upperBound && $0.endTime > region.lowerBound
+            }
+            guard !hasPatchHere else { continue }
             guard let latest = patchStore.patches(sessionId: track.id, region: region).first else { continue }
-            controller.setPreviewPatch(latest, fileURL: patchStore.fileURL(for: latest), for: track)
+            controller.activatePatch(latest, fileURL: patchStore.fileURL(for: latest), for: track)
         }
     }
 
@@ -602,7 +668,7 @@ struct StemPlayerView: View {
         do {
             let patch = try patchStore.addPatch(sessionId: track.id, timeRange: pending.region, tempFileURL: pending.tempURL)
             controller.clearPendingRecording()
-            controller.setPreviewPatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
+            controller.activatePatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
             if let feedbackId = replyingToFeedbackId {
                 replyingToFeedbackId = nil
                 feedbackStore.addAttempt(patch: patch, to: feedbackId)

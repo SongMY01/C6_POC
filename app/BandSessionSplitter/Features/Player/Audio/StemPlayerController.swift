@@ -86,9 +86,20 @@ final class StemPlayerController: ObservableObject {
         }
         // 믹서에 연결된 입력이 하나도 없으면 engine.prepare()가 예외를 던진다 — 최소 하나는 미리 만든다.
         _ = originalNode(of: track, at: 0)
-        engine.attach(track.patchNode)
-        track.patchConnectedFormat = nil
-        connectPatchNodeIfNeeded(track)
+        for player in track.patchPlayers.values {
+            attach(player)
+        }
+    }
+
+    /// 패치 플레이어를 녹음 파일 형식 그대로 믹서에 연결한다.
+    func attach(_ player: PatchPlayer) {
+        engine.attach(player.node)
+        engine.connect(player.node, to: engine.mainMixerNode, format: player.file.processingFormat)
+    }
+
+    func detach(_ player: PatchPlayer) {
+        player.node.stop()
+        if player.node.engine != nil { engine.detach(player.node) }
     }
 
     /// 원본 조각용 플레이어 i번째를 돌려준다. 모자라면 새로 만들어 엔진에 붙인다.
@@ -108,16 +119,6 @@ final class StemPlayerController: ObservableObject {
             node.stop()
             if node.engine != nil { engine.detach(node) }
         }
-        track.patchConnectedFormat = nil
-    }
-
-    /// 패치 플레이어를 "지금 켜진 패치 파일의 형식"으로 믹서에 연결한다 (형식이 바뀔 때만).
-    private func connectPatchNodeIfNeeded(_ track: StemTrack) {
-        guard let file = track.previewFile, track.patchNode.engine != nil else { return }
-        let format = file.processingFormat
-        if let connected = track.patchConnectedFormat, connected == format { return }
-        engine.connect(track.patchNode, to: engine.mainMixerNode, format: format)
-        track.patchConnectedFormat = format
     }
 
     /// 녹음(마이크 입력 노드가 그래프에 들어간 상태)이 끝나면 재생 전용 세션으로 되돌리는데,
@@ -181,22 +182,18 @@ final class StemPlayerController: ObservableObject {
     /// 편집·패치 전환을 해도 다른 트랙은 전혀 영향을 받지 않는다.
     private func schedule(track: StemTrack, songTime t: TimeInterval, hostTime h: UInt64) {
         track.stopAll()
-        connectPatchNodeIfNeeded(track)
 
         func host(at songT: TimeInterval) -> AVAudioTime {
             AVAudioTime(hostTime: h + AVAudioTime.hostTime(forSeconds: max(0, songT - t)))
         }
 
-        var activePatch: (patch: Patch, file: AVAudioFile)?
-        if let patch = track.previewPatch, let file = track.previewFile, track.patchConnectedFormat != nil {
-            activePatch = (patch, file)
-        }
+        let patches = track.activePatches.filter { track.patchPlayers[$0.id] != nil }
 
         // 원본 조각
         let file = track.file
         let rate = file.processingFormat.sampleRate
         var nodeIndex = 0
-        for piece in track.regions.playbackPieces(excluding: activePatch?.patch.timeRange) where piece.songEnd > t {
+        for piece in track.regions.playbackPieces(excluding: patches.map(\.timeRange)) where piece.songEnd > t {
             let start = max(t, piece.songStart)
             let startFrame = AVAudioFramePosition((piece.sourceStart + (start - piece.songStart)) * rate)
             let endFrame = min(file.length, AVAudioFramePosition((piece.sourceStart + (piece.songEnd - piece.songStart)) * rate))
@@ -208,15 +205,17 @@ final class StemPlayerController: ObservableObject {
         }
 
         // 패치 조각: 녹음본의 sourceStart부터 구간 길이만큼만 (녹음 여백이 뒤 원본과 겹치지 않게)
-        if let (patch, patchFile) = activePatch, t < patch.endTime {
+        for patch in patches where t < patch.endTime {
+            guard let player = track.patchPlayers[patch.id] else { continue }
+            let patchFile = player.file
             let start = max(t, patch.startTime)
             let patchRate = patchFile.processingFormat.sampleRate
             let startFrame = AVAudioFramePosition((patch.sourceStart + start - patch.startTime) * patchRate)
             let endFrame = min(patchFile.length, AVAudioFramePosition((patch.sourceStart + patch.duration) * patchRate))
             if endFrame > startFrame {
-                track.patchNode.scheduleSegment(patchFile, startingFrame: startFrame,
-                                                frameCount: AVAudioFrameCount(endFrame - startFrame), at: nil)
-                track.patchNode.play(at: host(at: start))
+                player.node.scheduleSegment(patchFile, startingFrame: startFrame,
+                                            frameCount: AVAudioFrameCount(endFrame - startFrame), at: nil)
+                player.node.play(at: host(at: start))
             }
         }
     }

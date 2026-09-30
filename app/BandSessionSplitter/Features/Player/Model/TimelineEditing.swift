@@ -69,12 +69,12 @@ extension Array where Element == TrackRegion {
         return (left.id, right.id)
     }
 
-    /// 실제로 재생할 원본 조각들 = 리전들에서 켜진 패치 구간을 뺀 나머지.
-    func playbackPieces(excluding patchRange: ClosedRange<TimeInterval>?) -> [PlaybackPiece] {
+    /// 실제로 재생할 원본 조각들 = 리전들에서 켜진 패치 구간들을 뺀 나머지.
+    func playbackPieces(excluding patchRanges: [ClosedRange<TimeInterval>]) -> [PlaybackPiece] {
         var pieces: [PlaybackPiece] = []
         for region in self {
             var parts = [(region.timelineStart, region.timelineEnd)]
-            if let pr = patchRange {
+            for pr in patchRanges {
                 parts = parts.flatMap { (a, b) -> [(TimeInterval, TimeInterval)] in
                     var out: [(TimeInterval, TimeInterval)] = []
                     if a < pr.lowerBound { out.append((a, Swift.min(b, pr.lowerBound))) }

@@ -37,7 +37,7 @@ struct TrackHeader: View {
                 .font(.system(size: 20))
                 .buttonStyle(.plain)
 
-                if track.previewPatch != nil {
+                if !track.activePatches.isEmpty {
                     HStack(spacing: 10) {
                         Text("패치")
                             .font(.system(size: 13, weight: .bold))
