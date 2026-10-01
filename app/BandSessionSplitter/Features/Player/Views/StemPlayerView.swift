@@ -68,9 +68,15 @@ struct StemPlayerView: View {
             && t < region.timelineEnd - TimelineEditing.minLength
     }
 
-    /// 코멘트를 기다리는 피드백 수 — 피드백 버튼에 배지로 보여준다.
+    /// 피드백 버튼 배지 숫자 = 이 iPad 사람이 지금 해야 할 일.
+    /// 리더: 코멘트를 기다리는 시도 수 / 세션 연주자: 내 세션의 "연습 필요" 수.
     private var awaitingCommentCount: Int {
-        feedbackStore.items.filter { $0.status == .awaitingComment }.count
+        if DeviceRole.isLeader {
+            return feedbackStore.items.filter { $0.status == .awaitingComment }.count
+        }
+        return feedbackStore.items.filter {
+            $0.status == .needsPractice && $0.isFor(sessionId: DeviceRole.current)
+        }.count
     }
 
     private let headerWidth: CGFloat = 280
@@ -106,9 +112,18 @@ struct StemPlayerView: View {
         .environment(\.colorScheme, .dark)
         .overlay(alignment: .bottom) { bottomBanners }
         .onAppear {
-            if selectedTrackId == nil { selectedTrackId = controller.tracks.first?.id }
+            if selectedTrackId == nil {
+                // 세션 연주자의 iPad는 자기 트랙을 선택해 둔다 (● 녹음 버튼이 바로 내 세션을 녹음)
+                selectedTrackId = controller.tracks.first { $0.id == DeviceRole.current }?.id ?? controller.tracks.first?.id
+            }
             activateAdoptedPatches()
+            SyncClient.shared.attach(
+                feedback: { feedbackStore.replaceAll($0) },
+                patches: { applyRemotePatches($0) },
+                audioURL: { patchStore.fileURL(for: $0) }
+            )
         }
+        .onDisappear { SyncClient.shared.detach() }
         .onChange(of: controller.loopRegion) { _, newRegion in
             selectLatestPatchByDefault(for: newRegion)
         }
@@ -146,6 +161,14 @@ struct StemPlayerView: View {
                 }
             }
             .buttonStyle(GBToolButtonStyle(isOn: showingFeedbackBoard, onColor: .orange))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(DeviceRole.label(for: DeviceRole.current))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                SyncStatusLabel(compact: true)
+            }
+            .fixedSize()
 
             Spacer(minLength: 8)
 
@@ -595,6 +618,34 @@ struct StemPlayerView: View {
               let track = controller.tracks.first(where: { $0.id == attempt.sessionId }) else { return }
         patchStore.setAdopted(true, patchId: patch.id)
         controller.activatePatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
+    }
+
+    /// 다른 기기에서 바뀐 패치 목록을 반영하고, 재생 중인 패치 구성을 맞춘다.
+    /// - 삭제된 패치는 끄고, 위치가 바뀐 패치는 새 위치로 다시 켠다.
+    /// - 새로 곡에 반영(채택)된 패치는 켜고, 반영이 해제된 패치는 끈다.
+    private func applyRemotePatches(_ remote: [Patch]) {
+        let before = Dictionary(patchStore.patches.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        patchStore.replaceAll(remote)
+        let after = Dictionary(remote.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for track in controller.tracks {
+            for active in track.activePatches {
+                guard let updated = after[active.id] else {
+                    controller.deactivatePatch(active.id, for: track)
+                    continue
+                }
+                let wasAdopted = before[active.id]?.isAdopted == true
+                if wasAdopted && !updated.isAdopted && !comparedTrackIds.contains(track.id) {
+                    controller.deactivatePatch(active.id, for: track)
+                } else if updated.startTime != active.startTime || updated.endTime != active.endTime
+                            || updated.sourceStart != active.sourceStart {
+                    controller.deactivatePatch(active.id, for: track)
+                    controller.activatePatch(updated, fileURL: patchStore.fileURL(for: updated), for: track)
+                }
+            }
+            for patch in remote where patch.sessionId == track.id && patch.isAdopted && before[patch.id]?.isAdopted != true {
+                controller.activatePatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
+            }
+        }
     }
 
     /// 곡에 반영된(채택된) 패치를 모두 켠다. 곡을 열 때와 비교 듣기를 마쳤을 때 호출한다.

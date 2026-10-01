@@ -28,7 +28,12 @@ let serverCandidates = [ServerCandidate(name: "이 Mac", url: "http://127.0.0.1:
 let serverCandidates = [
     ServerCandidate(name: "집 Wi-Fi", url: "http://192.168.0.5:8756"),
     ServerCandidate(name: "학교", url: "http://10.141.52.89:8756"),
-]
+    // Mac의 "인터넷 공유"로 Mac이 직접 Wi-Fi를 만들 때 Mac 주소
+    ServerCandidate(name: "Mac 인터넷 공유", url: "http://192.168.2.1:8756"),
+] + (2...14).map {
+    // iPhone 개인용 핫스팟은 연결된 기기에 172.20.10.2~14를 나눠준다 (유저테스트 현장용)
+    ServerCandidate(name: "핫스팟", url: "http://172.20.10.\($0):8756")
+}
 #endif
 
 @MainActor
@@ -52,6 +57,14 @@ final class SessionViewModel: ObservableObject {
         serverURLText = url
         isManualServer = true
         serverStatus = "직접 입력한 주소 사용"
+        connectSync()
+    }
+
+    /// 지금 고른 서버로 여러 iPad 동기화를 연결한다.
+    private func connectSync() {
+        if let url = URL(string: serverURLText) {
+            SyncClient.shared.configure(baseURL: url)
+        }
     }
 
     /// 후보들 중 지금 응답하는 서버를 찾아 고른다. 모두 응답이 없으면 주소는 그대로 둔다.
@@ -61,6 +74,7 @@ final class SessionViewModel: ObservableObject {
         if let found = await Self.firstReachable(serverCandidates) {
             serverURLText = found.url
             serverStatus = "\(found.name) 서버 연결됨"
+            connectSync()
         } else {
             serverStatus = "응답하는 서버 없음 — 서버가 켜져 있는지, 같은 Wi-Fi인지 확인"
         }
@@ -111,6 +125,19 @@ final class SessionViewModel: ObservableObject {
                 state = .separating
                 try await pollUntilDone(jobId: jobId, service: svc)
                 try await downloadAllStems(jobId: jobId, service: svc)
+                state = .ready
+            } catch {
+                state = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// 리더가 이미 분리해 둔 공유 곡을 업로드·분리 없이 바로 내려받는다.
+    func loadSharedSong() {
+        guard let jobId = SyncClient.shared.songJobId else { return }
+        Task {
+            do {
+                try await downloadAllStems(jobId: jobId, service: service)
                 state = .ready
             } catch {
                 state = .failed(error.localizedDescription)

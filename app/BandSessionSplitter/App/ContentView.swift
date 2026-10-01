@@ -5,6 +5,8 @@ struct ContentView: View {
     @StateObject private var viewModel = SessionViewModel()
     @State private var showingFilePicker = false
     @State private var showingServerSettings = false
+    @ObservedObject private var sync = SyncClient.shared
+    @AppStorage("deviceRole") private var role = DeviceRole.leader
 
     var body: some View {
         NavigationStack {
@@ -19,6 +21,7 @@ struct ContentView: View {
 
                         switch viewModel.state {
                         case .idle:
+                            roleAndSharedSong
                             pickPrompt
                         case .fileSelected(let name):
                             fileSelectedView(name: name)
@@ -49,6 +52,10 @@ struct ContentView: View {
                     }
                 }
             }
+            .task {
+                // 앱을 켜면 바로 서버를 찾아 동기화를 시작한다 (공유 곡 여부를 알기 위해)
+                if !viewModel.isManualServer { await viewModel.detectServer() }
+            }
             .sheet(isPresented: $showingServerSettings) {
                 serverSettingsSheet
             }
@@ -71,6 +78,36 @@ struct ContentView: View {
             Text("Demucs(htdemucs_6s) 로컬 서버 연동 검증용 프로토타입")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// 이 iPad를 누가 쓰는지 고르고, 리더가 분리해 둔 공유 곡을 바로 여는 영역.
+    private var roleAndSharedSong: some View {
+        VStack(spacing: 16) {
+            VStack(spacing: 8) {
+                Text("이 iPad는").font(.subheadline).foregroundStyle(.secondary)
+                Picker("역할", selection: $role) {
+                    ForEach(DeviceRole.options, id: \.id) { option in
+                        Text(option.label).tag(option.id)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 640)
+            }
+            if sync.songJobId != nil {
+                Button {
+                    viewModel.loadSharedSong()
+                } label: {
+                    Label("합주 곡 열기 (공유됨)", systemImage: "music.note.house")
+                        .font(.title3.weight(.semibold))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                Text("리더가 분리해 둔 곡을 바로 엽니다. 새 녹음을 분리하려면 아래에서 파일을 고르세요.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            SyncStatusLabel()
+            Divider().padding(.vertical, 8)
         }
     }
 

@@ -37,8 +37,12 @@ extension Patch {
     }
 }
 
+/// 재녹음 패치 저장소. 녹음 파일과 목록을 로컬에 두고, 바뀐 내용은 SyncClient로 서버에 보낸다
+/// (새 녹음은 파일까지 업로드). 다른 기기의 변경은 replaceAll로 들어온다.
 @MainActor
 final class PatchStore: ObservableObject {
+    private var sync: SyncClient { .shared }
+
     @Published private(set) var patches: [Patch] = []
 
     private let baseDir: URL
@@ -65,6 +69,22 @@ final class PatchStore: ObservableObject {
         try? data.write(to: manifestURL)
     }
 
+    /// 서버에서 받은 최신 목록으로 교체. 목록에서 빠진 패치의 녹음 파일은 지운다.
+    func replaceAll(_ newPatches: [Patch]) {
+        let sorted = newPatches.sorted { $0.createdAt > $1.createdAt }
+        guard sorted != patches else { return }
+        let keep = Set(sorted.map(\.id))
+        for old in patches where !keep.contains(old.id) {
+            try? FileManager.default.removeItem(at: fileURL(for: old))
+        }
+        patches = sorted
+        persistManifest()
+    }
+
+    private func pushUpsert(_ patch: Patch) {
+        sync.send("patch.upsert", ["patch": SyncClient.json(patch)])
+    }
+
     func fileURL(for patch: Patch) -> URL {
         baseDir.appendingPathComponent("patch_\(patch.id.uuidString).caf")
     }
@@ -84,6 +104,8 @@ final class PatchStore: ObservableObject {
         try FileManager.default.moveItem(at: tempFileURL, to: dest)
         patches.insert(patch, at: 0)
         persistManifest()
+        sync.uploadAudio(patchId: patch.id, fileURL: dest)
+        pushUpsert(patch)
         return patch
     }
 
@@ -94,6 +116,7 @@ final class PatchStore: ObservableObject {
         patches[i].endTime = patch.endTime
         patches[i].sourceStart = patch.sourceStart
         persistManifest()
+        pushUpsert(patches[i])
     }
 
     func patch(id: UUID) -> Patch? {
@@ -109,10 +132,12 @@ final class PatchStore: ObservableObject {
                 && patches[j].sessionId == target.sessionId
                 && patches[j].startTime < target.endTime && patches[j].endTime > target.startTime {
                 patches[j].isAdopted = false
+                pushUpsert(patches[j])
             }
         }
         patches[i].isAdopted = adopted
         persistManifest()
+        pushUpsert(patches[i])
     }
 
     /// 세션별 채택된 패치들.
@@ -124,6 +149,7 @@ final class PatchStore: ObservableObject {
         try? FileManager.default.removeItem(at: fileURL(for: patch))
         patches.removeAll { $0.id == patch.id }
         persistManifest()
+        sync.send("patch.delete", ["id": patch.id.uuidString])
     }
 
     /// 특정 세션의 모든 패치 (최신 순) — 타임라인 레인에 블록으로 그릴 때 쓴다.

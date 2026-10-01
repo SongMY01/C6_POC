@@ -10,8 +10,8 @@ struct FeedbackBoardView: View {
     let onOpen: (FeedbackItem) -> Void
     let onCompose: (() -> Void)?
 
-    /// nil = 전체 세션
-    @State private var sessionFilter: String?
+    /// nil = 전체 세션. 세션 연주자의 iPad에서는 처음에 "내 세션"으로 걸러서 보여준다.
+    @State private var sessionFilter: String? = DeviceRole.isLeader ? nil : DeviceRole.current
     /// nil = 전체 상태
     @State private var statusFilter: FeedbackStatus?
 

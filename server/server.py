@@ -11,6 +11,8 @@ iPad Swift 앱이 통합 녹음 파일을 업로드하면, 이미 검증한 Demu
   GET  /jobs/{job_id}/stems/{name}.mp3     -> 오디오 바이너리
 
 분리는 백그라운드 스레드에서 실행되고, 클라이언트는 status를 폴링한다.
+
+여러 iPad 동기화(sync.py): 이 서버가 피드백·재녹음 패치·공유 곡의 기준 저장소 역할을 한다.
 """
 import shutil
 import subprocess
@@ -22,6 +24,8 @@ from typing import Dict
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+from server.sync import router as sync_router, set_song_job, current_song_job
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -39,6 +43,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(sync_router)
 
 # job_id -> {"status": "queued"|"processing"|"done"|"error", "error": str|None, "stems_dir": Path|None}
 JOBS: Dict[str, dict] = {}
@@ -79,10 +85,28 @@ def run_separation(job_id: str, input_path: Path):
         with JOBS_LOCK:
             JOBS[job_id]["status"] = "done"
             JOBS[job_id]["stems_dir"] = final_dir
+        # 가장 최근에 분리한 곡을 모든 iPad가 함께 쓰는 "공유 곡"으로 지정
+        set_song_job(job_id)
     except Exception as e:  # noqa: BLE001
         with JOBS_LOCK:
             JOBS[job_id]["status"] = "error"
             JOBS[job_id]["error"] = str(e)
+
+
+def restore_finished_jobs():
+    """서버를 재시작해도 이전에 분리해 둔 곡(특히 공유 곡)을 다시 내려받을 수 있게 한다."""
+    for job_dir in DATA_DIR.iterdir():
+        stems_dir = job_dir / "stems"
+        if job_dir.is_dir() and stems_dir.is_dir():
+            JOBS[job_dir.name] = {"status": "done", "error": None, "stems_dir": stems_dir}
+    # 공유 곡이 아직 없으면 가장 최근에 분리한 곡으로
+    if current_song_job() is None:
+        done = [d for d in DATA_DIR.iterdir() if (d / "stems").is_dir()]
+        if done:
+            set_song_job(max(done, key=lambda d: d.stat().st_mtime).name)
+
+
+restore_finished_jobs()
 
 
 @app.post("/jobs")

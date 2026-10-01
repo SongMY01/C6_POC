@@ -167,8 +167,12 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
     }
 }
 
+/// 피드백 저장소. 로컬 파일에 저장하고, 바뀐 내용은 SyncClient로 서버에 보낸다.
+/// 다른 기기에서 바뀐 내용은 SyncClient가 replaceAll로 통째로 넣어 준다.
 @MainActor
 final class FeedbackStore: ObservableObject {
+    private var sync: SyncClient { .shared }
+
     @Published private(set) var items: [FeedbackItem] = []
 
     private let manifestURL: URL
@@ -193,6 +197,14 @@ final class FeedbackStore: ObservableObject {
         try? data.write(to: manifestURL, options: .atomic)
     }
 
+    /// 서버에서 받은 최신 상태로 교체 (다른 기기의 변경 반영).
+    func replaceAll(_ newItems: [FeedbackItem]) {
+        let sorted = newItems.sorted { $0.startTime < $1.startTime }
+        guard sorted != items else { return }
+        items = sorted
+        persist()
+    }
+
     private func update(_ feedbackId: UUID, _ change: (inout FeedbackItem) -> Void) {
         guard let i = items.firstIndex(where: { $0.id == feedbackId }) else { return }
         change(&items[i])
@@ -205,12 +217,14 @@ final class FeedbackStore: ObservableObject {
         items.append(item)
         items.sort { $0.startTime < $1.startTime }
         persist()
+        sync.send("feedback.add", ["item": SyncClient.json(item)])
         return item
     }
 
     func delete(_ item: FeedbackItem) {
         items.removeAll { $0.id == item.id }
         persist()
+        sync.send("feedback.delete", ["id": item.id.uuidString])
     }
 
     func item(id: UUID) -> FeedbackItem? {
@@ -219,10 +233,12 @@ final class FeedbackStore: ObservableObject {
 
     /// 녹음을 새 시도로 올린다 → 코멘트 요청 상태. 통과했던 피드백이면 다시 열린다.
     func addAttempt(patch: Patch, to feedbackId: UUID) {
+        let attempt = FeedbackAttempt(sessionId: patch.sessionId, patchId: patch.id)
         update(feedbackId) {
-            $0.attempts.append(FeedbackAttempt(sessionId: patch.sessionId, patchId: patch.id))
+            $0.attempts.append(attempt)
             $0.passedAttemptId = nil
         }
+        sync.send("attempt.add", ["feedbackId": feedbackId.uuidString, "attempt": SyncClient.json(attempt)])
     }
 
     func deleteAttempt(_ attemptId: UUID, from feedbackId: UUID) {
@@ -230,6 +246,7 @@ final class FeedbackStore: ObservableObject {
             $0.attempts.removeAll { $0.id == attemptId }
             if $0.passedAttemptId == attemptId { $0.passedAttemptId = nil }
         }
+        sync.send("attempt.delete", ["feedbackId": feedbackId.uuidString, "attemptId": attemptId.uuidString])
     }
 
     /// attemptId가 있으면 그 시도에, 없으면 피드백 자체에 코멘트를 단다.
@@ -242,6 +259,11 @@ final class FeedbackStore: ObservableObject {
                 item.comments.append(comment)
             }
         }
+        sync.send("comment.add", [
+            "feedbackId": feedbackId.uuidString,
+            "attemptId": attemptId?.uuidString ?? NSNull(),
+            "comment": SyncClient.json(comment),
+        ])
     }
 
     func deleteComment(_ commentId: UUID, from feedbackId: UUID) {
@@ -251,10 +273,12 @@ final class FeedbackStore: ObservableObject {
                 item.attempts[i].comments.removeAll { $0.id == commentId }
             }
         }
+        sync.send("comment.delete", ["feedbackId": feedbackId.uuidString, "commentId": commentId.uuidString])
     }
 
     /// 시도를 통과 처리한다 (nil이면 다시 열기).
     func setPassed(_ attemptId: UUID?, for feedbackId: UUID) {
         update(feedbackId) { $0.passedAttemptId = attemptId }
+        sync.send("feedback.setPassed", ["id": feedbackId.uuidString, "attemptId": attemptId?.uuidString ?? NSNull()])
     }
 }

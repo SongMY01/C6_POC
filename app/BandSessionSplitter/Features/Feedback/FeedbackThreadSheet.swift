@@ -30,14 +30,20 @@ struct FeedbackThreadSheet: View {
     let onClose: () -> Void
 
     @State private var commentText = ""
-    @State private var commentAuthor = FeedbackPeople.leader
+    /// 코멘트 작성자 — 이 iPad의 역할이 기본값 (필요하면 바꿀 수 있음).
+    @State private var commentAuthor = DeviceRole.current
     /// 펼쳐 둔 이전 시도들 (최신 시도는 항상 펼침).
     @State private var expandedAttempts: Set<UUID> = []
 
     /// 녹음으로 답할 수 있는 세션 = 받는 세션 (전체 대상이면 모든 세션).
+    /// 세션 연주자의 iPad에서는 자기 세션만 보인다 (리더는 시연용으로 전부).
     private var replyingTracks: [StemTrack] {
-        item.isForAllSessions ? tracks : tracks.filter { item.targetSessionIds.contains($0.id) }
+        let targets = item.isForAllSessions ? tracks : tracks.filter { item.targetSessionIds.contains($0.id) }
+        return DeviceRole.isLeader ? targets : targets.filter { $0.id == DeviceRole.current }
     }
+
+    /// 통과·다시 열기는 리더만.
+    private var canJudge: Bool { DeviceRole.isLeader }
 
     private var latestAttempt: FeedbackAttempt? { item.attempts.last }
 
@@ -55,7 +61,7 @@ struct FeedbackThreadSheet: View {
                     }
                 }
 
-                if item.status == .passed {
+                if item.status == .passed && canJudge {
                     Section {
                         Button("다시 열기 (추가 연습 필요)") { onSetPassed(nil) }
                     } footer: {
@@ -174,7 +180,7 @@ struct FeedbackThreadSheet: View {
             if patch == nil {
                 Text("삭제된 녹음").font(.caption).foregroundStyle(.secondary)
             }
-            if isLatest && item.status != .passed {
+            if isLatest && item.status != .passed && canJudge {
                 Button {
                     onSetPassed(attempt.id)
                 } label: {
