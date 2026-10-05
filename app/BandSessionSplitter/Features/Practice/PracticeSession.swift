@@ -162,46 +162,12 @@ final class PracticeSession: ObservableObject {
 
 /// 카운트인용 클릭 소리. 짧은 사인파를 메모리에서 만들어 AVAudioPlayer로 낸다 (메인 엔진과 별개).
 private final class Clicker {
-    private let normal: AVAudioPlayer?
-    private let accent: AVAudioPlayer?
-
-    init() {
-        normal = Self.makePlayer(frequency: 1000)
-        accent = Self.makePlayer(frequency: 1600)
-    }
+    private let normal = SoundSynth.player(notes: [.init(frequency: 1000, start: 0, length: 0.07, decay: 55)])
+    private let accent = SoundSynth.player(notes: [.init(frequency: 1600, start: 0, length: 0.07, decay: 55)])
 
     func click(accent isAccent: Bool) {
         let player = isAccent ? accent : normal
         player?.currentTime = 0
         player?.play()
-    }
-
-    private static func makePlayer(frequency: Double) -> AVAudioPlayer? {
-        let sampleRate = 44100
-        let count = Int(0.07 * Double(sampleRate))
-        var samples = [Int16]()
-        samples.reserveCapacity(count)
-        for i in 0..<count {
-            let t = Double(i) / Double(sampleRate)
-            let envelope = exp(-t * 55)
-            samples.append(Int16(sin(2 * .pi * frequency * t) * envelope * 0.8 * 32767))
-        }
-
-        var data = Data()
-        func append<T: FixedWidthInteger>(_ value: T) {
-            var little = value.littleEndian
-            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
-        }
-        let dataSize = UInt32(samples.count * 2)
-        data.append(contentsOf: Array("RIFF".utf8)); append(UInt32(36 + dataSize))
-        data.append(contentsOf: Array("WAVEfmt ".utf8)); append(UInt32(16))
-        append(UInt16(1)); append(UInt16(1)); append(UInt32(sampleRate)); append(UInt32(sampleRate * 2))
-        append(UInt16(2)); append(UInt16(16))
-        data.append(contentsOf: Array("data".utf8)); append(dataSize)
-        for sample in samples { append(sample) }
-
-        let player = try? AVAudioPlayer(data: data)
-        player?.prepareToPlay()
-        return player
     }
 }

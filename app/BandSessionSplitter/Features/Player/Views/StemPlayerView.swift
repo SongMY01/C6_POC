@@ -14,6 +14,8 @@ struct StemPlayerView: View {
     @ObservedObject private var variants = VariantStore.shared
     /// 오늘의 구간 연습 진행 (카운트인 · 템포 사다리)
     @StateObject private var practice = PracticeSession()
+    /// 구간 정복 순간의 비포/애프터 (버전 A)
+    @StateObject private var reveal = RevealSession()
     @State private var showingScore = false
     /// 트랙(파형) 대신 피드백 목록 화면을 보여줄지.
     @State private var showingFeedbackBoard = false
@@ -93,6 +95,20 @@ struct StemPlayerView: View {
         VStack(spacing: 0) {
             transportBar
             Divider().overlay(Color.black)
+            if variants.isOn(.coverageMap) {
+                CoverageMapBar(
+                    items: feedbackStore.items,
+                    tracks: controller.tracks,
+                    duration: controller.duration,
+                    currentTime: controller.currentTime,
+                    highlightId: reveal.feedbackId,
+                    onTap: { openFeedback($0) }
+                )
+                Divider().overlay(Color.black)
+            }
+            if reveal.isActive {
+                RevealBar(session: reveal, progressText: coverageProgressText)
+            }
             if practice.isActive {
                 PracticeBar(
                     session: practice,
@@ -142,6 +158,7 @@ struct StemPlayerView: View {
         .onDisappear {
             SyncClient.shared.detach()
             practice.stop()
+            reveal.stop()
         }
         .onChange(of: controller.loopRegion) { _, newRegion in
             selectLatestPatchByDefault(for: newRegion)
@@ -523,6 +540,7 @@ struct StemPlayerView: View {
     /// 피드백 깃발·말풍선 탭: 그 구간을 구간반복으로 잡고 스레드를 연다.
     private func openFeedback(_ item: FeedbackItem) {
         practice.stop()
+        reveal.stop()
         selectedRegion = nil
         selectedPatch = nil
         selectedFeedbackId = item.id
@@ -653,6 +671,7 @@ struct StemPlayerView: View {
 
     /// 오늘의 구간을 카운트인 · 템포 사다리(켜진 버전에서)로 바로 시작한다.
     private func startPractice(_ item: FeedbackItem) {
+        reveal.stop()
         activeSheet = nil
         showingFeedbackBoard = false
         selectedRegion = nil
@@ -698,6 +717,32 @@ struct StemPlayerView: View {
               let track = controller.tracks.first(where: { $0.id == attempt.sessionId }) else { return }
         patchStore.setAdopted(true, patchId: patch.id)
         controller.activatePatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
+        if variants.isOn(.revealMoment) {
+            beginReveal(feedback: feedback, patch: patch, track: track)
+        }
+    }
+
+    /// 정복 진행 문구 ("정복 3/12")
+    private var coverageProgressText: String {
+        let progress = CoverageMap.progress(of: CoverageMap.relevantItems(feedbackStore.items))
+        return "정복 \(progress.done)/\(progress.total)"
+    }
+
+    /// 구간을 마무리한 순간: 처음 소리 → 지금 내 연주를 들려주고 정복 효과음을 낸다.
+    private func beginReveal(feedback: FeedbackItem, patch: Patch, track: StemTrack) {
+        activeSheet = nil
+        practice.stop()
+        // 시트가 내려가는 동안 잠깐 기다렸다가 시작한다.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            reveal.start(
+                feedbackId: feedback.id,
+                sessionName: track.displayName,
+                region: feedback.timeRange,
+                controller: controller,
+                showOriginal: { controller.deactivatePatch(patch.id, for: track) },
+                showNew: { controller.activatePatch(patch, fileURL: patchStore.fileURL(for: patch), for: track) }
+            )
+        }
     }
 
     /// 다른 기기에서 바뀐 패치 목록을 반영하고, 재생 중인 패치 구성을 맞춘다.
@@ -778,6 +823,7 @@ struct StemPlayerView: View {
 
     private func recordTapped() {
         practice.stop()
+        reveal.stop()
         if controller.isRecording {
             controller.stopPatchRecording()
             recordingTrackId = nil
@@ -836,7 +882,10 @@ struct StemPlayerView: View {
             if let feedbackId = replyingToFeedbackId {
                 replyingToFeedbackId = nil
                 submitAttempt(patch, to: feedbackId)
-                activeSheet = .thread(feedbackId)
+                // 마지막 녹음으로 자동 마무리되면 비포/애프터 장면이 대신 나온다.
+                let finishedWithReveal = variants.isOn(.revealMoment)
+                    && feedbackStore.item(id: feedbackId)?.status == .passed
+                if !finishedWithReveal { activeSheet = .thread(feedbackId) }
             }
         } catch {
             recordingError = "패치 저장 실패: \(error.localizedDescription)"

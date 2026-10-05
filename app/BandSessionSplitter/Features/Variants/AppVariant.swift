@@ -9,8 +9,8 @@ enum Feature: String, CaseIterable {
     case friendlyWording    // "연습 필요/통과" → "합주 때 만나요/준비 완료" 같은 친근한 말투
 
     // A. 정복 지도
-    case coverageMap        // 곡 타임라인이 지도처럼, 연습한 구간이 색으로 채워짐
-    case revealMoment       // 끝나면 원본 → 내 연주 비포/애프터 + 완료 사운드
+    case coverageMap        // 곡 전체 정복 지도 — 피드백 구간이 해볼 곳 → 진행 중 → 정복으로 채워짐
+    case revealMoment       // 마무리하면 처음 소리 → 지금 내 연주 비포/애프터 + 정복 차임
 
     // B. 같이 하는 밴드
     case presence           // "베이스 지금 연습 중" 실시간 표시
