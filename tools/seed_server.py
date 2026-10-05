@@ -96,5 +96,23 @@ def request(method, path, data=None, content_type="application/json"):
 audio = tone.read_bytes()
 for p in patches:
     request("PUT", f"/sync/patches/{p['id']}/audio", audio, "application/octet-stream")
-print(request("POST", "/sync/admin/replace", json.dumps({"feedback": feedback, "patches": patches}).encode()).decode())
+
+# 버전 B용: 리액션, 칭호, 이번 합주 전 연습을 시작한 사람, 다음 합주(3일 뒤)
+def find_id(fragment):
+    return next(f["id"] for f in feedback if fragment in f["text"])
+def reaction(text_prefix, emoji, author, t):
+    return {"id": U(), "feedbackId": find_id(text_prefix), "emoji": emoji, "author": author, "createdAt": t}
+reactions = [
+    reaction("벌스 베이스 라인", "👏", "drums", d0 + 4 * DAY + 2000),
+    reaction("벌스 베이스 라인", "🔥", "piano", d0 + 4 * DAY + 2400),
+    reaction("아웃트로 피아노", "🎯", "bass", d0 + 4 * DAY + 1500),
+    reaction("솔로 앞부분", "💪", "leader", d0 + 4 * DAY + 3000),
+]
+titles = [
+    {"id": U(), "toSession": "bass", "title": "칼박 요정", "from": "drums", "createdAt": d0 + 4 * DAY + 5000},
+    {"id": U(), "toSession": "piano", "title": "분위기 메이커", "from": "guitar", "createdAt": d0 + 4 * DAY + 5200},
+]
+body = {"feedback": feedback, "patches": patches, "reactions": reactions, "titles": titles,
+        "teamStarted": ["bass", "piano"], "nextRehearsal": time.time() + 3 * DAY}
+print(request("POST", "/sync/admin/replace", json.dumps(body).encode()).decode())
 print(f"피드백 {len(feedback)}개, 패치 {len(patches)}개 → {BASE}")

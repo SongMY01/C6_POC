@@ -28,6 +28,8 @@ struct FeedbackThreadSheet: View {
     let onSetPassed: (UUID?) -> Void
     let onDeleteFeedback: () -> Void
     let onClose: () -> Void
+    /// 응원 리액션을 보여줄지 (버전 B)
+    var showsReactions = false
 
     @State private var commentText = ""
     /// 코멘트 작성자 — 이 iPad의 역할이 기본값 (필요하면 바꿀 수 있음).
@@ -66,6 +68,14 @@ struct FeedbackThreadSheet: View {
                         Button(Wording.reopenButton) { onSetPassed(nil) }
                     } footer: {
                         Text("통과한 시도의 녹음이 곡에 반영되어 있습니다. 다시 열면 원본으로 돌아갑니다. 새 시도를 올리면 피드백이 다시 열리지만, 새 시도가 통과할 때까지는 지금 반영된 녹음이 유지됩니다.")
+                    }
+                }
+
+                if showsReactions {
+                    Section {
+                        ReactionStrip(feedbackId: item.id, tracks: tracks)
+                    } header: { Text("응원 보내기") } footer: {
+                        Text("눌러서 한마디 없이도 응원을 전할 수 있어요. 다시 누르면 취소돼요.")
                     }
                 }
 

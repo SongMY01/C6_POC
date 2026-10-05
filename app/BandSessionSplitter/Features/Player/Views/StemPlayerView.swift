@@ -12,6 +12,8 @@ struct StemPlayerView: View {
     @StateObject private var patchStore = PatchStore()
     /// 테스트 버전이 바뀌면(서버에서 전환) 화면의 켜짐/꺼짐 요소가 바로 따라가도록 관찰한다.
     @ObservedObject private var variants = VariantStore.shared
+    /// 칭호·리액션이 바뀌면 화면이 따라가도록 관찰한다.
+    @ObservedObject private var syncClient = SyncClient.shared
     /// 오늘의 구간 연습 진행 (카운트인 · 템포 사다리)
     @StateObject private var practice = PracticeSession()
     /// 구간 정복 순간의 비포/애프터 (버전 A)
@@ -37,6 +39,7 @@ struct StemPlayerView: View {
 
     private enum FeedbackSheet: Identifiable {
         case compose
+        case titles
         case dailyPick
         case thread(UUID)
         /// 겹치거나 붙어 있는 피드백 묶음에서 고르기
@@ -45,6 +48,7 @@ struct StemPlayerView: View {
         var id: String {
             switch self {
             case .compose: return "compose"
+            case .titles: return "titles"
             case .dailyPick: return "dailyPick"
             case .thread(let id): return "thread-\(id)"
             case .picker(let ids): return "picker-\(ids.map(\.uuidString).joined())"
@@ -95,6 +99,10 @@ struct StemPlayerView: View {
         VStack(spacing: 0) {
             transportBar
             Divider().overlay(Color.black)
+            if variants.isOn(.presence) || variants.isOn(.teamRing) || variants.isOn(.peerTitles) {
+                TeamBar(feedback: feedbackStore.items, tracks: controller.tracks, onTitles: { activeSheet = .titles })
+                Divider().overlay(Color.black)
+            }
             if variants.isOn(.coverageMap) {
                 CoverageMapBar(
                     items: feedbackStore.items,
@@ -149,6 +157,11 @@ struct StemPlayerView: View {
             }
             activateAdoptedPatches()
             SyncClient.shared.log("song_open")
+            // 지금 뭘 하는 중인지 동료에게 보여준다 (연습 중 / 녹음 중)
+            SyncClient.shared.activityProvider = { [practice, controller] in
+                if controller.isRecording { return "recording" }
+                return practice.isActive ? "practicing" : nil
+            }
             SyncClient.shared.attach(
                 feedback: { feedbackStore.replaceAll($0) },
                 patches: { applyRemotePatches($0) },
@@ -157,6 +170,7 @@ struct StemPlayerView: View {
         }
         .onDisappear {
             SyncClient.shared.detach()
+            SyncClient.shared.activityProvider = nil
             practice.stop()
             reveal.stop()
         }
@@ -310,7 +324,8 @@ struct StemPlayerView: View {
                                 isSelected: selectedTrackId == track.id,
                                 isRecording: recordingTrackId == track.id,
                                 onSelect: { selectedTrackId = track.id },
-                                onSolo: { controller.setSolo(track.id) }
+                                onSolo: { controller.setSolo(track.id) },
+                                titleText: variants.isOn(.peerTitles) ? syncClient.latestTitle(for: track.id)?.title : nil
                             )
                             .frame(height: laneHeight)
                         }
@@ -583,6 +598,9 @@ struct StemPlayerView: View {
                     onCancel: { activeSheet = nil }
                 )
             }
+        case .titles:
+            TitlesSheet(tracks: controller.tracks, onClose: { activeSheet = nil })
+                .presentationDetents([.large])
         case .dailyPick:
             DailyPickSheet(
                 items: feedbackStore.items,
@@ -621,7 +639,8 @@ struct StemPlayerView: View {
                         deleteFeedback(item)
                         activeSheet = nil
                     },
-                    onClose: { activeSheet = nil }
+                    onClose: { activeSheet = nil },
+                    showsReactions: variants.isOn(.reactions)
                 )
             }
         }

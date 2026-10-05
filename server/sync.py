@@ -13,6 +13,8 @@ iPad는 바뀐 내용을 "작은 작업(op)" 단위로 보내고(POST /sync/ops)
   POST /sync/admin/replace {feedback, patches}   (테스트 데이터 초기화용)
   POST /sync/admin/variant {variant}             (모든 iPad의 테스트 버전 전환, null이면 해제)
   POST /sync/events {events:[...]}               (앱 행동 기록 → data/sync/events.jsonl)
+  POST /sync/presence {device, role, activity}   (지금 뭘 하고 있는지 알리고, 다른 사람들의 상태를 받는다 — 저장 안 함)
+  POST /sync/admin/rehearsal {nextRehearsal, reset}  (다음 합주 시각 / 팀 시작 현황 초기화)
 
 피드백·패치 JSON은 앱(Swift Codable)이 만든 모양 그대로 저장한다 — 서버는 id로 찾아
 필요한 필드만 건드린다.
@@ -46,6 +48,15 @@ def _load() -> dict:
 
 _state = _load()
 _state.setdefault("variant", None)
+# 버전 B용 공유 상태: 응원 리액션, 동료 칭호, 이번 합주 전 연습을 시작한 사람들, 다음 합주 시각(epoch 초)
+_state.setdefault("reactions", [])
+_state.setdefault("titles", [])
+_state.setdefault("teamStarted", [])
+_state.setdefault("nextRehearsal", time.time() + 3 * 86400)
+
+# 지금 연습 중 표시(메모리만): device -> {role, activity, ts}
+_presence: dict = {}
+PRESENCE_TTL = 20  # 초
 
 
 def _save():
@@ -121,6 +132,19 @@ def _apply(op: dict):
             f["comments"] = [c for c in f.get("comments", []) if c["id"] != p["commentId"]]
             for a in f.get("attempts", []):
                 a["comments"] = [c for c in a.get("comments", []) if c["id"] != p["commentId"]]
+    elif t == "reaction.add":
+        r = p["reaction"]
+        if not any(x["id"] == r["id"] for x in _state["reactions"]):
+            _state["reactions"].append(r)
+    elif t == "reaction.remove":
+        _state["reactions"] = [x for x in _state["reactions"] if x["id"] != p["id"]]
+    elif t == "title.give":
+        title = p["title"]
+        if not any(x["id"] == title["id"] for x in _state["titles"]):
+            _state["titles"].append(title)
+    elif t == "member.started":
+        if p["role"] not in _state["teamStarted"]:
+            _state["teamStarted"].append(p["role"])
     elif t == "patch.upsert":
         patch = p["patch"]
         _state["patches"] = [x for x in _state["patches"] if x["id"] != patch["id"]] + [patch]
@@ -191,6 +215,32 @@ async def post_events(request: Request):
     return {"ok": True}
 
 
+@router.post("/presence")
+async def post_presence(request: Request):
+    """각 iPad가 3초마다 "나는 지금 이걸 하는 중"을 알리고, 다른 사람들의 지금 상태를 돌려받는다."""
+    body = await request.json()
+    now = time.time()
+    device = body.get("device", "?")
+    _presence[device] = {"device": device, "role": body.get("role"), "activity": body.get("activity"), "ts": now}
+    active = [v for v in _presence.values() if now - v["ts"] < PRESENCE_TTL]
+    for stale in [d for d, v in _presence.items() if now - v["ts"] >= PRESENCE_TTL * 6]:
+        _presence.pop(stale, None)
+    return {"presence": active}
+
+
+@router.post("/admin/rehearsal")
+async def admin_rehearsal(request: Request):
+    """다음 합주 시각(epoch 초)을 정하거나, 이번 주기의 "연습 시작" 현황을 초기화한다."""
+    body = await request.json()
+    with _lock:
+        if body.get("nextRehearsal") is not None:
+            _state["nextRehearsal"] = body["nextRehearsal"]
+        if body.get("reset"):
+            _state["teamStarted"] = []
+        _bump()
+        return {"version": _state["version"], "nextRehearsal": _state["nextRehearsal"], "teamStarted": _state["teamStarted"]}
+
+
 @router.post("/admin/replace")
 async def admin_replace(request: Request):
     """유저테스트 전에 모든 기기의 피드백·패치를 한 번에 초기화한다 (공유 곡은 유지)."""
@@ -198,6 +248,11 @@ async def admin_replace(request: Request):
     with _lock:
         _state["feedback"] = body.get("feedback", [])
         _state["patches"] = body.get("patches", [])
+        _state["reactions"] = body.get("reactions", [])
+        _state["titles"] = body.get("titles", [])
+        _state["teamStarted"] = body.get("teamStarted", [])
+        if body.get("nextRehearsal") is not None:
+            _state["nextRehearsal"] = body["nextRehearsal"]
         keep = {p["id"] for p in _state["patches"]}
         for f in AUDIO_DIR.glob("*.caf"):
             if f.stem not in keep:

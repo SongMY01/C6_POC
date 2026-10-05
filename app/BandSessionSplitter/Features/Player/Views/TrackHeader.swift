@@ -9,6 +9,8 @@ struct TrackHeader: View {
     let isRecording: Bool
     let onSelect: () -> Void
     let onSolo: () -> Void
+    /// 동료에게 받은 칭호 (버전 B)
+    var titleText: String? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -21,6 +23,14 @@ struct TrackHeader: View {
                         .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(.white)
                         .lineLimit(1)
+                    if let titleText {
+                        Text("🏅 \(titleText)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Capsule().fill(GB.cycle.opacity(0.25)))
+                            .foregroundStyle(GB.cycle)
+                            .lineLimit(1)
+                    }
                 }
                 HStack(spacing: 16) {
                     Button { track.isMuted.toggle() } label: {
