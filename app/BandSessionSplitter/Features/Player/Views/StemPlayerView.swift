@@ -117,6 +117,7 @@ struct StemPlayerView: View {
                 selectedTrackId = controller.tracks.first { $0.id == DeviceRole.current }?.id ?? controller.tracks.first?.id
             }
             activateAdoptedPatches()
+            SyncClient.shared.log("song_open")
             SyncClient.shared.attach(
                 feedback: { feedbackStore.replaceAll($0) },
                 patches: { applyRemotePatches($0) },
@@ -148,7 +149,10 @@ struct StemPlayerView: View {
             }
             .buttonStyle(GBToolButtonStyle(isOn: showingScore))
 
-            Button { showingFeedbackBoard.toggle() } label: {
+            Button {
+                showingFeedbackBoard.toggle()
+                if showingFeedbackBoard { SyncClient.shared.log("board_open") }
+            } label: {
                 HStack(spacing: 4) {
                     Image(systemName: showingFeedbackBoard ? "waveform" : "text.bubble")
                     if !showingFeedbackBoard, awaitingCommentCount > 0 {
@@ -166,7 +170,10 @@ struct StemPlayerView: View {
                 Text(DeviceRole.label(for: DeviceRole.current))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.85))
-                SyncStatusLabel(compact: true)
+                HStack(spacing: 6) {
+                    SyncStatusLabel(compact: true)
+                    VariantBadge()
+                }
             }
             .fixedSize()
 
@@ -497,6 +504,7 @@ struct StemPlayerView: View {
         controller.isLoopEnabled = true
         controller.seek(to: item.startTime)
         activeSheet = .thread(item.id)
+        SyncClient.shared.log("feedback_open", ["status": item.status.label])
     }
 
     /// 하나면 바로 열고, 여러 개가 묶여 있으면 목록에서 고르게 한다.
@@ -706,6 +714,7 @@ struct StemPlayerView: View {
               let track = controller.tracks.first(where: { $0.id == selectedTrackId }) else { return }
         recordingError = nil
         recordingTrackId = track.id
+        SyncClient.shared.log("record_start", ["session": track.id])
         Task {
             do {
                 try await controller.startPatchRecording(target: track, region: region)

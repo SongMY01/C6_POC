@@ -239,6 +239,7 @@ final class FeedbackStore: ObservableObject {
             $0.passedAttemptId = nil
         }
         sync.send("attempt.add", ["feedbackId": feedbackId.uuidString, "attempt": SyncClient.json(attempt)])
+        sync.log("attempt_added", ["session": patch.sessionId])
     }
 
     func deleteAttempt(_ attemptId: UUID, from feedbackId: UUID) {
@@ -259,6 +260,7 @@ final class FeedbackStore: ObservableObject {
                 item.comments.append(comment)
             }
         }
+        sync.log("comment_added")
         sync.send("comment.add", [
             "feedbackId": feedbackId.uuidString,
             "attemptId": attemptId?.uuidString ?? NSNull(),
@@ -280,5 +282,6 @@ final class FeedbackStore: ObservableObject {
     func setPassed(_ attemptId: UUID?, for feedbackId: UUID) {
         update(feedbackId) { $0.passedAttemptId = attemptId }
         sync.send("feedback.setPassed", ["id": feedbackId.uuidString, "attemptId": attemptId?.uuidString ?? NSNull()])
+        if attemptId != nil { sync.log("feedback_passed") }
     }
 }

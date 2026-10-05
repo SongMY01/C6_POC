@@ -24,6 +24,8 @@ final class SyncClient: ObservableObject {
     struct RemoteState: Decodable {
         let version: Int
         let songJobId: String?
+        /// 진행자가 Mac에서 정한 테스트 버전 (없으면 nil)
+        let variant: String?
         let feedback: [FeedbackItem]?
         let patches: [Patch]?
     }
@@ -37,6 +39,8 @@ final class SyncClient: ObservableObject {
     private var queue: [Pending] = []
     private var loopTask: Task<Void, Never>?
     private var isFlushing = false
+    /// 서버로 보낼 행동 기록 (유저테스트 분석용). 연결이 안 되면 쌓아 두었다 보낸다.
+    private var eventQueue: [[String: Any]] = []
 
     /// 서버에서 받은 상태를 각 저장소에 적용하는 콜백 (플레이어 화면이 연결한다).
     private var onRemoteFeedback: (([FeedbackItem]) -> Void)?
@@ -95,6 +99,7 @@ final class SyncClient: ObservableObject {
         if case .synced = status {} else { status = .syncing }
         do {
             try await flush()
+            try await flushEvents()
             try await pull()
             status = .synced(Date())
         } catch {
@@ -115,6 +120,41 @@ final class SyncClient: ObservableObject {
         guard let data = try? JSONEncoder().encode(value),
               let object = try? JSONSerialization.jsonObject(with: data) else { return NSNull() }
         return object
+    }
+
+    /// 행동 기록 한 줄. 기기·역할·테스트 버전을 함께 남긴다 (tools/test_report.py로 요약).
+    func log(_ name: String, _ extra: [String: Any] = [:]) {
+        var event: [String: Any] = [
+            "name": name,
+            "device": Self.deviceId,
+            "role": DeviceRole.current,
+            "variant": VariantStore.shared.current.id,
+            "clientTime": Date().timeIntervalSince1970,
+        ]
+        if !extra.isEmpty { event["extra"] = extra }
+        eventQueue.append(event)
+        Task { await syncNow() }
+    }
+
+    /// 기기를 구분하는 짧은 id (앱을 지우기 전까지 유지)
+    private static let deviceId: String = {
+        let key = "deviceId"
+        if let saved = UserDefaults.standard.string(forKey: key) { return saved }
+        let new = String(UUID().uuidString.prefix(4)).lowercased()
+        UserDefaults.standard.set(new, forKey: key)
+        return new
+    }()
+
+    private func flushEvents() async throws {
+        guard let baseURL, !eventQueue.isEmpty else { return }
+        let batch = eventQueue
+        var request = URLRequest(url: baseURL.appendingPathComponent("sync/events"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["events": batch])
+        try await check(URLSession.shared.data(for: request))
+        eventQueue.removeFirst(min(batch.count, eventQueue.count))
     }
 
     func uploadAudio(patchId: UUID, fileURL: URL) {
@@ -171,6 +211,7 @@ final class SyncClient: ObservableObject {
         let remote = try JSONDecoder().decode(RemoteState.self, from: data)
         guard remote.version != lastVersion, let feedback = remote.feedback, let patches = remote.patches else { return }
         songJobId = remote.songJobId
+        VariantStore.shared.serverVariantId = remote.variant
         // 저장소가 아직 연결 안 됐거나(곡 선택 화면), 받는 사이에 새 로컬 변경이 생겼으면
         // 적용하지 않는다 — 버전을 기억하지 않으므로 다음 주기에 다시 받는다.
         guard let onRemoteFeedback, let onRemotePatches, queue.isEmpty else { return }

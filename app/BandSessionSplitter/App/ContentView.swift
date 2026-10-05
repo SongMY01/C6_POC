@@ -53,6 +53,7 @@ struct ContentView: View {
                 }
             }
             .task {
+                SyncClient.shared.log("app_open")
                 // 앱을 켜면 바로 서버를 찾아 동기화를 시작한다 (공유 곡 여부를 알기 위해)
                 if !viewModel.isManualServer { await viewModel.detectServer() }
             }
@@ -106,7 +107,10 @@ struct ContentView: View {
                 Text("리더가 분리해 둔 곡을 바로 엽니다. 새 녹음을 분리하려면 아래에서 파일을 고르세요.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            SyncStatusLabel()
+            HStack(spacing: 10) {
+                SyncStatusLabel()
+                VariantBadge(onDark: false)
+            }
             Divider().padding(.vertical, 8)
         }
     }
@@ -173,6 +177,7 @@ struct ContentView: View {
                 } footer: {
                     Text("분리를 시작할 때마다 아래 후보 중 응답하는 서버를 자동으로 고릅니다.")
                 }
+                VariantPickerSection()
                 Section("후보") {
                     ForEach(serverCandidates) { candidate in
                         Button {
@@ -198,14 +203,14 @@ struct ContentView: View {
                     .autocorrectionDisabled()
                 }
             }
-            .navigationTitle("서버 설정")
+            .navigationTitle("설정")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("완료") { showingServerSettings = false }
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
         .task { if !viewModel.isManualServer { await viewModel.detectServer() } }
     }
 }

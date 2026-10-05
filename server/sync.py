@@ -11,12 +11,15 @@ iPad는 바뀐 내용을 "작은 작업(op)" 단위로 보내고(POST /sync/ops)
   PUT  /sync/patches/{id}/audio    (녹음 파일 바이너리 업로드)
   GET  /sync/patches/{id}/audio
   POST /sync/admin/replace {feedback, patches}   (테스트 데이터 초기화용)
+  POST /sync/admin/variant {variant}             (모든 iPad의 테스트 버전 전환, null이면 해제)
+  POST /sync/events {events:[...]}               (앱 행동 기록 → data/sync/events.jsonl)
 
 피드백·패치 JSON은 앱(Swift Codable)이 만든 모양 그대로 저장한다 — 서버는 id로 찾아
 필요한 필드만 건드린다.
 """
 import json
 import threading
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -25,6 +28,7 @@ from fastapi.responses import FileResponse
 SYNC_DIR = Path(__file__).resolve().parent / "data" / "sync"
 AUDIO_DIR = SYNC_DIR / "patches"
 STATE_PATH = SYNC_DIR / "state.json"
+EVENTS_PATH = SYNC_DIR / "events.jsonl"
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
 router = APIRouter(prefix="/sync")
@@ -37,10 +41,11 @@ def _load() -> dict:
             return json.loads(STATE_PATH.read_text())
         except json.JSONDecodeError:
             pass
-    return {"version": 0, "songJobId": None, "feedback": [], "patches": []}
+    return {"version": 0, "songJobId": None, "variant": None, "feedback": [], "patches": []}
 
 
 _state = _load()
+_state.setdefault("variant", None)
 
 
 def _save():
@@ -161,6 +166,29 @@ async def get_audio(patch_id: str):
     if not path.exists():
         raise HTTPException(404, "audio not uploaded")
     return FileResponse(path, media_type="audio/x-caf")
+
+
+@router.post("/admin/variant")
+async def admin_variant(request: Request):
+    """진행자가 Mac에서 모든 iPad의 테스트 버전(A/B/C …)을 한 번에 바꾼다. iPad는 3초 안에 반영."""
+    body = await request.json()
+    variant = body.get("variant")
+    with _lock:
+        _state["variant"] = variant or None
+        _bump()
+        return {"version": _state["version"], "variant": _state["variant"]}
+
+
+@router.post("/events")
+async def post_events(request: Request):
+    """앱이 보내는 행동 기록(앱 열기, 곡 열기, 녹음 시작 …)을 한 줄씩 쌓는다. 서버 시각을 함께 남긴다."""
+    body = await request.json()
+    now = time.time()
+    with _lock, EVENTS_PATH.open("a") as f:
+        for event in body.get("events", []):
+            event["serverTime"] = now
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    return {"ok": True}
 
 
 @router.post("/admin/replace")

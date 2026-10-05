@@ -20,12 +20,16 @@ PoC/
 │       │   │   ├── Storage/      #   패치(재녹음본)·리전 편집 저장
 │       │   │   └── Views/        #   트랙 화면, 레인, 헤더, 스타일
 │       │   ├── Sync/             # 여러 iPad 동기화 클라이언트, 기기 역할(리더/세션)
+│       │   ├── Variants/         # 유저테스트용 버전(A/B/C) 전환 틀 — 기능 플래그
 │       │   ├── Feedback/         # 구간 피드백: 받는 세션 지정, 녹음 답변·코멘트 스레드, 겹침 묶음 표시
 │       │   └── Score/            # 악보 PDF 표시, 재생 위치↔페이지 싱크
 │       └── Resources/            # 악보 PDF
 ├── server/                       # FastAPI + Demucs(htdemucs_6s) 분리 서버 + 동기화 서버(sync.py)
 │   └── data/                     #   업로드·분리 결과, sync/ 공유 상태 (git 미포함)
-├── tools/seed_server.py          # 유저테스트용 샘플 피드백으로 동기화 서버 초기화
+├── tools/                        # 유저테스트 도구
+│   ├── seed_server.py            #   샘플 피드백으로 동기화 서버 초기화
+│   ├── set_variant.py            #   모든 iPad의 테스트 버전을 Mac에서 한 번에 전환
+│   └── test_report.py            #   앱 행동 기록(이벤트) 요약
 ├── research/                     # 분리 품질 분석 스크립트 (오디오·결과물은 git 미포함)
 └── docs/                         # PoC 검증 요약
 ```
@@ -67,3 +71,20 @@ Mac이 동기화 서버 역할을 한다. 모든 기기가 같은 네트워크�
 - 화면 왼쪽 위 역할 옆 점: 초록 = 동기화됨, 노랑 = 보내는 중, 빨강 = 서버 연결 안 됨(변경은 기기에 보관했다가 다시 연결되면 전송).
 - 동기화되는 것: 피드백·시도·코멘트·통과, 재녹음(녹음 파일 포함), 곡에 반영 여부, 공유 곡.
   동기화되지 않는 것: 트랙 리전 편집(옮기기·자르기), 볼륨·뮤트, 악보 페이지 보정.
+
+### 테스트 버전(A/B/C) 전환
+
+한 앱 안에서 기능 묶음만 바꿔 끼운다. 같은 서버 데이터를 공유하므로 버전을 바꿔도 피드백·녹음은 그대로다.
+
+```bash
+.venv/bin/python tools/set_variant.py list     # 버전 목록
+.venv/bin/python tools/set_variant.py A        # 모든 iPad를 A로 (3초 안에 반영)
+.venv/bin/python tools/set_variant.py clear    # 기본 버전으로
+```
+
+- iPad 화면에는 이름 대신 코드(`버전 A`)만 작게 표시된다 (참가자가 의도를 짐작하지 않도록).
+- ⚙️ 설정 → "테스트 버전"에서 이 기기만 따로 고정할 수 있다 (예: 2대는 A, 2대는 B로 비교). 고정한 기기는 서버 전환을 따르지 않는다.
+- 새 게임 요소를 만들 때: `Variants/AppVariant.swift`의 `Feature`에 항목을 추가하고, 버전별 묶음에 넣고,
+  화면에서는 `VariantStore.shared.isOn(.기능)`으로 켜고 끈다. 버전 id·이름은 `tools/set_variant.py`와 맞춘다.
+- 행동 기록(앱 열기·곡 열기·피드백 열기·녹음 시작·시도 올리기·코멘트·통과)이 `server/data/sync/events.jsonl`에 쌓이고,
+  `tools/test_report.py`로 기기·버전별 요약을 본다.
