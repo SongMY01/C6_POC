@@ -44,13 +44,7 @@ enum FeedbackStatus: Equatable {
     /// 리더가 통과 처리함
     case passed
 
-    var label: String {
-        switch self {
-        case .needsPractice: return "연습 필요"
-        case .awaitingComment: return "코멘트 요청"
-        case .passed: return "통과"
-        }
-    }
+    var label: String { Wording.statusLabel(self) }
 
     /// 여러 피드백이 한 표시로 묶였을 때 어떤 상태를 대표로 보여줄지 (주목할 것 먼저).
     var displayPriority: Int {
@@ -232,7 +226,8 @@ final class FeedbackStore: ObservableObject {
     }
 
     /// 녹음을 새 시도로 올린다 → 코멘트 요청 상태. 통과했던 피드백이면 다시 열린다.
-    func addAttempt(patch: Patch, to feedbackId: UUID) {
+    @discardableResult
+    func addAttempt(patch: Patch, to feedbackId: UUID) -> FeedbackAttempt {
         let attempt = FeedbackAttempt(sessionId: patch.sessionId, patchId: patch.id)
         update(feedbackId) {
             $0.attempts.append(attempt)
@@ -240,6 +235,7 @@ final class FeedbackStore: ObservableObject {
         }
         sync.send("attempt.add", ["feedbackId": feedbackId.uuidString, "attempt": SyncClient.json(attempt)])
         sync.log("attempt_added", ["session": patch.sessionId])
+        return attempt
     }
 
     func deleteAttempt(_ attemptId: UUID, from feedbackId: UUID) {

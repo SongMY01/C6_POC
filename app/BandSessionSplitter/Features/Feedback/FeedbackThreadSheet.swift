@@ -42,8 +42,8 @@ struct FeedbackThreadSheet: View {
         return DeviceRole.isLeader ? targets : targets.filter { $0.id == DeviceRole.current }
     }
 
-    /// 통과·다시 열기는 리더만.
-    private var canJudge: Bool { DeviceRole.isLeader }
+    /// 통과·다시 열기는 리더만. (녹음 2번 제한 버전은 "이 정도면 됐어요"를 누구나 누른다 — 리더 컨펌 없음)
+    private var canJudge: Bool { DeviceRole.isLeader || FeedbackRules.anyoneCanFinish }
 
     private var latestAttempt: FeedbackAttempt? { item.attempts.last }
 
@@ -61,9 +61,9 @@ struct FeedbackThreadSheet: View {
                     }
                 }
 
-                if item.status == .passed && canJudge {
+                if item.status == .passed && canJudge && !FeedbackRules.limitTakes {
                     Section {
-                        Button("다시 열기 (추가 연습 필요)") { onSetPassed(nil) }
+                        Button(Wording.reopenButton) { onSetPassed(nil) }
                     } footer: {
                         Text("통과한 시도의 녹음이 곡에 반영되어 있습니다. 다시 열면 원본으로 돌아갑니다. 새 시도를 올리면 피드백이 다시 열리지만, 새 시도가 통과할 때까지는 지금 반영된 녹음이 유지됩니다.")
                     }
@@ -124,7 +124,7 @@ struct FeedbackThreadSheet: View {
             attemptHeader(attempt, number: number, isLatest: isLatest, isExpanded: isExpanded)
             if isExpanded {
                 if attempt.comments.isEmpty {
-                    Text(isLatest && item.status == .awaitingComment ? "코멘트를 기다리는 중" : "코멘트 없음")
+                    Text(isLatest && item.status == .awaitingComment ? Wording.waitingForReply : "코멘트 없음")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.leading, 40)
@@ -184,7 +184,7 @@ struct FeedbackThreadSheet: View {
                 Button {
                     onSetPassed(attempt.id)
                 } label: {
-                    Label("통과", systemImage: "checkmark")
+                    Label(Wording.finishButton, systemImage: "checkmark")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
@@ -244,13 +244,30 @@ struct FeedbackThreadSheet: View {
 
     // MARK: 새 시도 올리기
 
+    @ViewBuilder
     private var recordSection: some View {
+        if !FeedbackRules.canAddTake(to: item) {
+            // 녹음 기회를 다 썼거나 이미 마무리한 피드백
+            Section {
+                Label(item.passedAttemptId != nil ? "이 피드백은 마무리됐어요" : "녹음 기회를 모두 썼어요",
+                      systemImage: "checkmark.seal")
+                    .foregroundStyle(.secondary)
+            } footer: {
+                Text(Wording.allDoneFooter)
+            }
+        } else {
+            recordButtons
+        }
+    }
+
+    private var recordButtons: some View {
         Section {
             ForEach(replyingTracks) { track in
                 Button {
                     onRecordAttempt(track.id)
                 } label: {
-                    Label("\(track.instrumentEmoji) \(track.displayName) \(item.attempts.count + 1)차 시도 녹음하기", systemImage: "record.circle")
+                    Label(Wording.recordButton(sessionName: track.displayName, emoji: track.instrumentEmoji, item: item),
+                          systemImage: "record.circle")
                 }
             }
             if !attachablePatches.isEmpty {
@@ -265,9 +282,10 @@ struct FeedbackThreadSheet: View {
                 }
             }
         } header: {
-            Text(item.attempts.isEmpty ? "연습해서 올리기" : "다시 연습해서 올리기")
+            Text(Wording.recordHeader(hasAttempts: !item.attempts.isEmpty))
         } footer: {
-            Text("이 피드백 구간을 준비 시간 2초 뒤부터 녹음합니다. 올리면 새 시도로 추가되고 코멘트 요청 상태가 됩니다.")
+            Text("이 피드백 구간을 준비 시간 2초 뒤부터 녹음합니다. 올리면 새 시도로 추가되고 코멘트 요청 상태가 됩니다."
+                 + (FeedbackRules.limitTakes ? "\n" + Wording.allDoneFooter : ""))
         }
     }
 

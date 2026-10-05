@@ -27,6 +27,11 @@ final class StemPlayerController: ObservableObject {
     @Published var loopRegion: ClosedRange<TimeInterval>?
     @Published var isLoopEnabled: Bool = false
 
+    /// 재생 속도 (1 = 원래 속도). 템포 사다리에서만 1이 아니다.
+    @Published private(set) var playbackRate: Float = 1
+    /// 구간 반복이 한 바퀴 돌아 처음으로 되돌아간 직후 불린다 (템포 사다리 진행용).
+    var onLoopWrap: (() -> Void)?
+
     private(set) var engine = AVAudioEngine()
     private var displayTimer: Timer?
     private var audioSessionConfigured = false
@@ -54,7 +59,7 @@ final class StemPlayerController: ObservableObject {
 
     private func songTime(atHost host: UInt64) -> TimeInterval {
         guard host > anchorHostTime else { return anchorSongTime }
-        return anchorSongTime + AVAudioTime.seconds(forHostTime: host - anchorHostTime)
+        return anchorSongTime + AVAudioTime.seconds(forHostTime: host - anchorHostTime) * Double(playbackRate)
     }
 
     // MARK: - 트랙 로드 / 엔진 그래프
@@ -80,21 +85,28 @@ final class StemPlayerController: ObservableObject {
     }
 
     private func attachNodes(of track: StemTrack) {
+        engine.attach(track.bus)
+        engine.attach(track.pitch)
+        engine.connect(track.bus, to: track.pitch, format: StemTrack.busFormat)
+        engine.connect(track.pitch, to: engine.mainMixerNode, format: StemTrack.busFormat)
+        track.pitch.rate = playbackRate
+        track.pitch.bypass = playbackRate == 1
+
         for node in track.originalNodes {
             engine.attach(node)
-            engine.connect(node, to: engine.mainMixerNode, format: track.file.processingFormat)
+            engine.connect(node, to: track.bus, format: track.file.processingFormat)
         }
         // 믹서에 연결된 입력이 하나도 없으면 engine.prepare()가 예외를 던진다 — 최소 하나는 미리 만든다.
         _ = originalNode(of: track, at: 0)
         for player in track.patchPlayers.values {
-            attach(player)
+            attach(player, to: track)
         }
     }
 
-    /// 패치 플레이어를 녹음 파일 형식 그대로 믹서에 연결한다.
-    func attach(_ player: PatchPlayer) {
+    /// 패치 플레이어를 녹음 파일 형식 그대로 트랙 버스에 연결한다.
+    func attach(_ player: PatchPlayer, to track: StemTrack) {
         engine.attach(player.node)
-        engine.connect(player.node, to: engine.mainMixerNode, format: player.file.processingFormat)
+        engine.connect(player.node, to: track.bus, format: player.file.processingFormat)
     }
 
     func detach(_ player: PatchPlayer) {
@@ -107,7 +119,7 @@ final class StemPlayerController: ObservableObject {
         while track.originalNodes.count <= index {
             let node = AVAudioPlayerNode()
             engine.attach(node)
-            engine.connect(node, to: engine.mainMixerNode, format: track.file.processingFormat)
+            engine.connect(node, to: track.bus, format: track.file.processingFormat)
             track.originalNodes.append(node)
             track.applyVolume()
         }
@@ -119,6 +131,8 @@ final class StemPlayerController: ObservableObject {
             node.stop()
             if node.engine != nil { engine.detach(node) }
         }
+        if track.bus.engine != nil { engine.detach(track.bus) }
+        if track.pitch.engine != nil { engine.detach(track.pitch) }
     }
 
     /// 녹음(마이크 입력 노드가 그래프에 들어간 상태)이 끝나면 재생 전용 세션으로 되돌리는데,
@@ -162,15 +176,30 @@ final class StemPlayerController: ObservableObject {
             guard (try? engine.start()) != nil else { return }
         }
 
-        // 출력 노드의 sampleTime으로 예약하면 출력 샘플레이트(실기기 48kHz)와 파일(44.1kHz)이
-        // 다를 때 예약 시각이 먼 미래로 해석돼, 시간은 흐르는데 무음만 나온다(실기기에서 실제로 겪음).
-        // 샘플레이트와 무관한 hostTime 기준으로 모든 트랙을 같은 순간에 시작시킨다.
-        let startHost = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: startDelay)
-        anchorSongTime = currentTime
-        anchorHostTime = startHost
-
-        for track in tracks {
-            schedule(track: track, songTime: currentTime, hostTime: startHost)
+        if playbackRate == 1 {
+            // 출력 노드의 sampleTime으로 예약하면 출력 샘플레이트(실기기 48kHz)와 파일(44.1kHz)이
+            // 다를 때 예약 시각이 먼 미래로 해석돼, 시간은 흐르는데 무음만 나온다(실기기에서 실제로 겪음).
+            // 샘플레이트와 무관한 hostTime 기준으로 모든 트랙을 같은 순간에 시작시킨다.
+            let startHost = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: startDelay)
+            anchorSongTime = currentTime
+            anchorHostTime = startHost
+            for track in tracks {
+                _ = schedule(track: track, songTime: currentTime, hostTime: startHost)
+            }
+        } else {
+            // 느리게 재생할 때는 hostTime 예약을 쓸 수 없다: 타임스트레치 장치를 거치면 노드의 시계가
+            // 속도만큼 늘어나서, 엔진을 켠 지 오래될수록 시작이 한참 밀린다(Mac 실험으로 확인).
+            // 대신 모든 노드를 "즉시" 시작하고, 나중에 시작할 조각은 앞에 무음을 붙여 간격을 맞춘다.
+            // (노드 시간 = 곡 시간이라 간격은 곡 초 단위 그대로 쓰면 된다.)
+            var starting: [AVAudioPlayerNode] = []
+            for track in tracks {
+                starting += schedule(track: track, songTime: currentTime, hostTime: nil)
+            }
+            // 장치 지연(소리가 실제로 나오기까지)만큼 늦춰서 화면 위치와 소리를 맞춘다.
+            let latency = (tracks.first?.pitch.latency ?? 0) + 0.05
+            anchorSongTime = currentTime
+            anchorHostTime = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: latency)
+            for node in starting { node.play() }
         }
         isPlaying = true
         startDisplayTimer()
@@ -180,11 +209,30 @@ final class StemPlayerController: ObservableObject {
     /// 리전마다(패치가 켜져 있으면 패치 구간을 뺀 앞뒤 조각마다) 플레이어를 하나씩 배정하고,
     /// 각자 정확한 시각에 미리 예약해 둔다 — 조각 경계에서 아무것도 다시 시작하지 않으므로
     /// 편집·패치 전환을 해도 다른 트랙은 전혀 영향을 받지 않는다.
-    private func schedule(track: StemTrack, songTime t: TimeInterval, hostTime h: UInt64) {
+    ///
+    /// hostTime이 nil이면(느린 재생) 예약만 하고, 시작할 노드 목록을 돌려준다 — 호출한 쪽이
+    /// 모든 트랙을 예약한 뒤 한꺼번에 play()한다.
+    private func schedule(track: StemTrack, songTime t: TimeInterval, hostTime h: UInt64?) -> [AVAudioPlayerNode] {
         track.stopAll()
+        var starting: [AVAudioPlayerNode] = []
 
-        func host(at songT: TimeInterval) -> AVAudioTime {
-            AVAudioTime(hostTime: h + AVAudioTime.hostTime(forSeconds: max(0, songT - t)))
+        /// 느린 재생에서 너무 먼 미래 조각까지 무음 버퍼를 만들지 않도록 예약 범위를 제한한다.
+        let horizon = (isLoopEnabled ? loopRegion?.upperBound : nil) ?? (t + 30)
+
+        /// 조각을 시작 위치에 맞춰 시작시킨다.
+        func begin(_ node: AVAudioPlayerNode, at songT: TimeInterval, format: AVAudioFormat,
+                   schedule segment: () -> Void) {
+            if let h {
+                segment()
+                node.play(at: AVAudioTime(hostTime: h + AVAudioTime.hostTime(forSeconds: max(0, songT - t))))
+            } else {
+                let delay = songT - t
+                if delay > 0.001, let silence = Self.silence(seconds: delay, format: format) {
+                    node.scheduleBuffer(silence, at: nil)
+                }
+                segment()
+                starting.append(node)
+            }
         }
 
         let patches = track.activePatches.filter { track.patchPlayers[$0.id] != nil }
@@ -195,13 +243,15 @@ final class StemPlayerController: ObservableObject {
         var nodeIndex = 0
         for piece in track.regions.playbackPieces(excluding: patches.map(\.timeRange)) where piece.songEnd > t {
             let start = max(t, piece.songStart)
+            if h == nil && start > horizon { continue }
             let startFrame = AVAudioFramePosition((piece.sourceStart + (start - piece.songStart)) * rate)
             let endFrame = min(file.length, AVAudioFramePosition((piece.sourceStart + (piece.songEnd - piece.songStart)) * rate))
             guard endFrame > startFrame else { continue }
             let node = originalNode(of: track, at: nodeIndex)
             nodeIndex += 1
-            node.scheduleSegment(file, startingFrame: startFrame, frameCount: AVAudioFrameCount(endFrame - startFrame), at: nil)
-            node.play(at: host(at: start))
+            begin(node, at: start, format: file.processingFormat) {
+                node.scheduleSegment(file, startingFrame: startFrame, frameCount: AVAudioFrameCount(endFrame - startFrame), at: nil)
+            }
         }
 
         // 패치 조각: 녹음본의 sourceStart부터 구간 길이만큼만 (녹음 여백이 뒤 원본과 겹치지 않게)
@@ -209,22 +259,56 @@ final class StemPlayerController: ObservableObject {
             guard let player = track.patchPlayers[patch.id] else { continue }
             let patchFile = player.file
             let start = max(t, patch.startTime)
+            if h == nil && start > horizon { continue }
             let patchRate = patchFile.processingFormat.sampleRate
             let startFrame = AVAudioFramePosition((patch.sourceStart + start - patch.startTime) * patchRate)
             let endFrame = min(patchFile.length, AVAudioFramePosition((patch.sourceStart + patch.duration) * patchRate))
             if endFrame > startFrame {
-                player.node.scheduleSegment(patchFile, startingFrame: startFrame,
-                                            frameCount: AVAudioFrameCount(endFrame - startFrame), at: nil)
-                player.node.play(at: host(at: start))
+                begin(player.node, at: start, format: patchFile.processingFormat) {
+                    player.node.scheduleSegment(patchFile, startingFrame: startFrame,
+                                                frameCount: AVAudioFrameCount(endFrame - startFrame), at: nil)
+                }
             }
         }
+        return starting
+    }
+
+    /// seconds 길이의 무음 버퍼 (느린 재생에서 늦게 시작하는 조각 앞에 붙인다).
+    private static func silence(seconds: TimeInterval, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let frames = AVAudioFrameCount(seconds * format.sampleRate)
+        guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames),
+              let channels = buffer.floatChannelData else { return nil }
+        buffer.frameLength = frames
+        for c in 0..<Int(format.channelCount) {
+            channels[c].update(repeating: 0, count: Int(frames))
+        }
+        return buffer
+    }
+
+    /// 재생 속도를 바꾼다 (재생 중이면 지금 위치에서 새 속도로 이어서). 1이면 장치를 우회한다.
+    func setPlaybackRate(_ rate: Float) {
+        guard rate != playbackRate else { return }
+        let wasPlaying = isPlaying
+        if wasPlaying { pause() }
+        playbackRate = rate
+        for track in tracks {
+            track.pitch.rate = rate
+            track.pitch.bypass = rate == 1
+        }
+        if wasPlaying { play() }
     }
 
     /// 재생 중이면 이 트랙만 지금 위치에 맞춰 다시 예약한다 — 다른 트랙은 건드리지 않는다.
     func rescheduleIfPlaying(_ track: StemTrack) {
         guard isPlaying else { return }
+        if playbackRate != 1 {
+            // 느린 재생은 트랙별로 따로 맞출 수 없으니 전체를 현재 위치에서 다시 시작한다.
+            currentTime = min(duration, songTime(atHost: mach_absolute_time()))
+            play()
+            return
+        }
         let host = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: 0.05)
-        schedule(track: track, songTime: songTime(atHost: host), hostTime: host)
+        _ = schedule(track: track, songTime: songTime(atHost: host), hostTime: host)
     }
 
     /// 곡 길이 = 원본 길이와 (옮겨서 뒤로 밀린) 리전 끝 중 가장 늦은 시점.
@@ -274,6 +358,7 @@ final class StemPlayerController: ObservableObject {
         if isLoopEnabled, let region = loopRegion, currentTime >= region.upperBound {
             // 구간 끝에 도달 -> 바로 구간 시작으로 되돌려 계속 재생
             seek(to: region.lowerBound)
+            onLoopWrap?()
             return
         }
 

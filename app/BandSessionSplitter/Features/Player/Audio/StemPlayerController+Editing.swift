@@ -71,7 +71,7 @@ extension StemPlayerController {
         deactivateOverlapping(patch, in: track)
         let player = PatchPlayer(file: file)
         track.patchPlayers[patch.id] = player
-        attach(player)
+        attach(player, to: track)
         track.applyVolume()
         track.activePatches.append(patch)
         track.activePatches.sort { $0.startTime < $1.startTime }

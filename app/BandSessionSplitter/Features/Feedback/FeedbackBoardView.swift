@@ -9,6 +9,8 @@ struct FeedbackBoardView: View {
     let currentTime: TimeInterval
     let onOpen: (FeedbackItem) -> Void
     let onCompose: (() -> Void)?
+    /// 오늘의 구간 뽑기 (해당 버전에서만 전달)
+    var onDailyPick: (() -> Void)? = nil
 
     /// nil = 전체 세션. 세션 연주자의 iPad에서는 처음에 "내 세션"으로 걸러서 보여준다.
     @State private var sessionFilter: String? = DeviceRole.isLeader ? nil : DeviceRole.current
@@ -74,6 +76,12 @@ struct FeedbackBoardView: View {
                     }
                 }
                 Spacer()
+                if let onDailyPick {
+                    Button(action: onDailyPick) {
+                        Label("오늘의 구간", systemImage: "dice")
+                    }
+                    .buttonStyle(GBToolButtonStyle())
+                }
                 if let onCompose {
                     Button(action: onCompose) {
                         Label("새 피드백", systemImage: "square.and.pencil")

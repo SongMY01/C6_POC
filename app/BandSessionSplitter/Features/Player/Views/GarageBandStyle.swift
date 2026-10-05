@@ -25,7 +25,7 @@ struct GBToolButtonStyle: ButtonStyle {
             .lineLimit(1)
             .fixedSize()
             .foregroundStyle(isOn ? onColor : Color.white.opacity(isEnabled ? 0.9 : 0.35))
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
             .frame(height: 40)
             .background(RoundedRectangle(cornerRadius: 9).fill(GB.panel.opacity(configuration.isPressed ? 0.6 : 1)))
     }

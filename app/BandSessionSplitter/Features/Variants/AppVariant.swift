@@ -75,11 +75,17 @@ final class VariantStore: ObservableObject {
     private static let overrideKey = "variantOverride"
 
     /// 서버가 알려 준 버전 id (SyncClient가 채운다)
-    @Published var serverVariantId: String?
+    @Published var serverVariantId: String? {
+        didSet { publishFeatures() }
+    }
     /// 이 기기만 직접 고른 버전 id. nil이면 서버를 따른다.
-    @Published private(set) var overrideId: String? = UserDefaults.standard.string(forKey: VariantStore.overrideKey)
+    @Published private(set) var overrideId: String? = UserDefaults.standard.string(forKey: VariantStore.overrideKey) {
+        didSet { publishFeatures() }
+    }
 
-    private init() {}
+    private init() {
+        publishFeatures()
+    }
 
     var current: AppVariant {
         AppVariant.find(overrideId) ?? AppVariant.find(serverVariantId) ?? .base
@@ -94,5 +100,20 @@ final class VariantStore: ObservableObject {
     func setOverride(_ id: String?) {
         overrideId = id
         UserDefaults.standard.set(id, forKey: Self.overrideKey)
+    }
+
+    // MARK: 어느 곳에서든 읽을 수 있는 기능 목록
+    //
+    // 열거형의 계산 속성(말투 등)은 메인 액터 밖에서도 불리므로, 현재 버전의 기능 목록을
+    // 잠금 없이 읽을 수 있는 곳에도 복사해 둔다. 값은 메인 스레드에서만 바뀌고 읽기만 흔하다.
+    nonisolated(unsafe) private static var activeFeatures: Set<Feature> = []
+
+    private func publishFeatures() {
+        Self.activeFeatures = current.features
+    }
+
+    /// 화면 코드 어디서든 쓸 수 있는 확인 함수.
+    nonisolated static func enabled(_ feature: Feature) -> Bool {
+        activeFeatures.contains(feature)
     }
 }

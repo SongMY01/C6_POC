@@ -10,6 +10,10 @@ struct StemPlayerView: View {
     @StateObject private var scoreSync = ScoreSyncController()
     @StateObject private var feedbackStore = FeedbackStore()
     @StateObject private var patchStore = PatchStore()
+    /// 테스트 버전이 바뀌면(서버에서 전환) 화면의 켜짐/꺼짐 요소가 바로 따라가도록 관찰한다.
+    @ObservedObject private var variants = VariantStore.shared
+    /// 오늘의 구간 연습 진행 (카운트인 · 템포 사다리)
+    @StateObject private var practice = PracticeSession()
     @State private var showingScore = false
     /// 트랙(파형) 대신 피드백 목록 화면을 보여줄지.
     @State private var showingFeedbackBoard = false
@@ -31,6 +35,7 @@ struct StemPlayerView: View {
 
     private enum FeedbackSheet: Identifiable {
         case compose
+        case dailyPick
         case thread(UUID)
         /// 겹치거나 붙어 있는 피드백 묶음에서 고르기
         case picker([UUID])
@@ -38,6 +43,7 @@ struct StemPlayerView: View {
         var id: String {
             switch self {
             case .compose: return "compose"
+            case .dailyPick: return "dailyPick"
             case .thread(let id): return "thread-\(id)"
             case .picker(let ids): return "picker-\(ids.map(\.uuidString).joined())"
             }
@@ -87,6 +93,13 @@ struct StemPlayerView: View {
         VStack(spacing: 0) {
             transportBar
             Divider().overlay(Color.black)
+            if practice.isActive {
+                PracticeBar(
+                    session: practice,
+                    canRecord: practiceFeedback.map { FeedbackRules.canAddTake(to: $0) } ?? false,
+                    onRecord: recordFromPractice
+                )
+            }
             HStack(spacing: 0) {
                 if showingScore {
                     ScoreView(scoreSync: scoreSync, currentTime: controller.currentTime)
@@ -101,7 +114,8 @@ struct StemPlayerView: View {
                         tracks: controller.tracks,
                         currentTime: controller.currentTime,
                         onOpen: { openFeedback($0) },
-                        onCompose: controller.loopRegion == nil ? nil : { activeSheet = .compose }
+                        onCompose: controller.loopRegion == nil ? nil : { activeSheet = .compose },
+                        onDailyPick: variants.isOn(.dailyPick) ? { activeSheet = .dailyPick } : nil
                     )
                 } else {
                     trackArea
@@ -111,6 +125,7 @@ struct StemPlayerView: View {
         .background(GB.background)
         .environment(\.colorScheme, .dark)
         .overlay(alignment: .bottom) { bottomBanners }
+        .overlay { CountInOverlay(session: practice) }
         .onAppear {
             if selectedTrackId == nil {
                 // 세션 연주자의 iPad는 자기 트랙을 선택해 둔다 (● 녹음 버튼이 바로 내 세션을 녹음)
@@ -124,7 +139,10 @@ struct StemPlayerView: View {
                 audioURL: { patchStore.fileURL(for: $0) }
             )
         }
-        .onDisappear { SyncClient.shared.detach() }
+        .onDisappear {
+            SyncClient.shared.detach()
+            practice.stop()
+        }
         .onChange(of: controller.loopRegion) { _, newRegion in
             selectLatestPatchByDefault(for: newRegion)
         }
@@ -138,7 +156,7 @@ struct StemPlayerView: View {
     // MARK: - 트랜스포트 바
 
     private var transportBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 7) {
             Button(action: onReset) {
                 Image(systemName: "chevron.left")
             }
@@ -165,6 +183,13 @@ struct StemPlayerView: View {
                 }
             }
             .buttonStyle(GBToolButtonStyle(isOn: showingFeedbackBoard, onColor: .orange))
+
+            if variants.isOn(.dailyPick) {
+                Button { activeSheet = .dailyPick } label: {
+                    Image(systemName: "dice")
+                }
+                .buttonStyle(GBToolButtonStyle(isOn: practice.isActive, onColor: .purple))
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(DeviceRole.label(for: DeviceRole.current))
@@ -241,7 +266,7 @@ struct StemPlayerView: View {
             .buttonStyle(GBToolButtonStyle())
         }
         .font(.system(size: 17, weight: .semibold))
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 10)
         .padding(.vertical, 10)
         .background(GB.toolbar)
     }
@@ -497,6 +522,7 @@ struct StemPlayerView: View {
 
     /// 피드백 깃발·말풍선 탭: 그 구간을 구간반복으로 잡고 스레드를 연다.
     private func openFeedback(_ item: FeedbackItem) {
+        practice.stop()
         selectedRegion = nil
         selectedPatch = nil
         selectedFeedbackId = item.id
@@ -539,6 +565,15 @@ struct StemPlayerView: View {
                     onCancel: { activeSheet = nil }
                 )
             }
+        case .dailyPick:
+            DailyPickSheet(
+                items: feedbackStore.items,
+                tracks: controller.tracks,
+                useLadder: VariantStore.shared.isOn(.tempoLadder),
+                onStart: { startPractice($0) },
+                onClose: { activeSheet = nil }
+            )
+            .presentationDetents([.fraction(0.62)])
         case .picker(let ids):
             FeedbackPickerSheet(
                 items: ids.compactMap { feedbackStore.item(id: $0) },
@@ -557,7 +592,7 @@ struct StemPlayerView: View {
                     comparisonSelection: { sessionId in comparisonSelection(for: item, sessionId: sessionId) },
                     onCompare: { sessionId, patch in compare(sessionId: sessionId, patch: patch, feedback: item) },
                     onRecordAttempt: { recordReply(to: item, sessionId: $0) },
-                    onAttachPatch: { feedbackStore.addAttempt(patch: $0, to: item.id) },
+                    onAttachPatch: { submitAttempt($0, to: item.id) },
                     onComment: { text, author, attemptId in
                         feedbackStore.addComment(text, author: author, to: item.id, attemptId: attemptId)
                     },
@@ -609,6 +644,43 @@ struct StemPlayerView: View {
             controller.seek(to: feedback.startTime)
             if !controller.isPlaying { controller.play() }
         }
+    }
+
+    /// 연습 중인 피드백
+    private var practiceFeedback: FeedbackItem? {
+        practice.feedbackId.flatMap { feedbackStore.item(id: $0) }
+    }
+
+    /// 오늘의 구간을 카운트인 · 템포 사다리(켜진 버전에서)로 바로 시작한다.
+    private func startPractice(_ item: FeedbackItem) {
+        activeSheet = nil
+        showingFeedbackBoard = false
+        selectedRegion = nil
+        selectedPatch = nil
+        selectedFeedbackId = item.id
+        practice.start(
+            region: item.timeRange, feedbackId: item.id, controller: controller,
+            countIn: VariantStore.shared.isOn(.startCountIn),
+            ladder: VariantStore.shared.isOn(.tempoLadder)
+        )
+    }
+
+    /// 연습을 끝낸 뒤 바로 녹음해서 올린다 (그 피드백을 받는 세션 중 내 세션, 리더면 첫 대상).
+    private func recordFromPractice() {
+        guard let item = practiceFeedback else { return }
+        let sessionId = item.targetSessionIds.contains(DeviceRole.current)
+            ? DeviceRole.current : (item.targetSessionIds.first ?? DeviceRole.current)
+        practice.stop()
+        recordReply(to: item, sessionId: sessionId)
+    }
+
+    /// 녹음을 시도로 올린다. 녹음 횟수를 제한하는 버전에서는 마지막 기회까지 쓰면 자동으로 마무리한다
+    /// (마무리 = 그 녹음이 곡에 반영됨).
+    private func submitAttempt(_ patch: Patch, to feedbackId: UUID) {
+        let attempt = feedbackStore.addAttempt(patch: patch, to: feedbackId)
+        guard let item = feedbackStore.item(id: feedbackId), FeedbackRules.shouldAutoFinish(item) else { return }
+        setPassed(attempt.id, feedback: item)
+        SyncClient.shared.log("feedback_auto_finished")
     }
 
     /// 통과 처리하면 그 시도의 녹음을 곡에 반영(채택)하고 바로 켠다.
@@ -705,6 +777,7 @@ struct StemPlayerView: View {
     }
 
     private func recordTapped() {
+        practice.stop()
         if controller.isRecording {
             controller.stopPatchRecording()
             recordingTrackId = nil
@@ -762,7 +835,7 @@ struct StemPlayerView: View {
             controller.activatePatch(patch, fileURL: patchStore.fileURL(for: patch), for: track)
             if let feedbackId = replyingToFeedbackId {
                 replyingToFeedbackId = nil
-                feedbackStore.addAttempt(patch: patch, to: feedbackId)
+                submitAttempt(patch, to: feedbackId)
                 activeSheet = .thread(feedbackId)
             }
         } catch {
