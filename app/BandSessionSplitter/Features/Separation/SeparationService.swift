@@ -96,19 +96,14 @@ final class SeparationService {
         return try JSONDecoder().decode(JobStatusResponse.self, from: data)
     }
 
-    /// 완료된 job에서 특정 스템 mp3를 로컬 임시 디렉토리로 내려받는다.
+    /// 완료된 job의 스템 mp3를 기기에 받아 둔다. 이미 받아 둔 파일이면 서버에 접속하지 않고 그대로 쓴다.
     func downloadStem(jobId: String, stemKey: String) async throws -> URL {
+        if let cached = SongCache.cachedURL(jobId: jobId, stemKey: stemKey) { return cached }
         let url = baseURL.appendingPathComponent("jobs/\(jobId)/stems/\(stemKey).mp3")
         let (tempURL, response) = try await URLSession.shared.download(from: url)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw SeparationError.badResponse
         }
-        let dest = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(jobId)-\(stemKey).mp3")
-        if FileManager.default.fileExists(atPath: dest.path) {
-            try FileManager.default.removeItem(at: dest)
-        }
-        try FileManager.default.moveItem(at: tempURL, to: dest)
-        return dest
+        return try SongCache.store(tempURL, jobId: jobId, stemKey: stemKey)
     }
 }

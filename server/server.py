@@ -16,6 +16,7 @@ iPad Swift 앱이 통합 녹음 파일을 업로드하면, 이미 검증한 Demu
 """
 import shutil
 import subprocess
+import sys
 import threading
 import uuid
 from pathlib import Path
@@ -58,7 +59,7 @@ def run_separation(job_id: str, input_path: Path):
             JOBS[job_id]["status"] = "processing"
 
         cmd = [
-            "demucs",
+            sys.executable, "-m", "demucs",
             "-n", MODEL_NAME,
             "-d", "mps",
             "--mp3", "--mp3-bitrate", "320",

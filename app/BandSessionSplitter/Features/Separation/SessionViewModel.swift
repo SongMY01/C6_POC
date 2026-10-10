@@ -45,6 +45,8 @@ final class SessionViewModel: ObservableObject {
     /// ⚙️에서 주소를 직접 입력했으면 자동 선택을 하지 않는다.
     @Published private(set) var isManualServer = false
     @Published var playerController = StemPlayerController()
+    /// 서버에 연결되지 않아도 열 수 있도록 이 기기에 저장해 둔 곡이 있는지.
+    @Published private(set) var hasCachedSong = SongCache.lastJobId.map(SongCache.isComplete) ?? false
 
     private var pickedFileURL: URL?
     private var service: SeparationService {
@@ -133,8 +135,9 @@ final class SessionViewModel: ObservableObject {
     }
 
     /// 리더가 이미 분리해 둔 공유 곡을 업로드·분리 없이 바로 내려받는다.
+    /// 서버에 연결되지 않아 공유 곡을 모르면, 이 기기에 저장해 둔 마지막 곡을 연다.
     func loadSharedSong() {
-        guard let jobId = SyncClient.shared.songJobId else { return }
+        guard let jobId = SyncClient.shared.songJobId ?? SongCache.lastJobId else { return }
         Task {
             do {
                 try await downloadAllStems(jobId: jobId, service: service)
@@ -169,5 +172,7 @@ final class SessionViewModel: ObservableObject {
             }
         }
         playerController.load(tracks: tracks)
+        SongCache.markOpened(jobId: jobId)
+        hasCachedSong = true
     }
 }

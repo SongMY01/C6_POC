@@ -94,7 +94,7 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 640)
             }
-            if sync.songJobId != nil {
+            if sync.songJobId != nil || viewModel.hasCachedSong {
                 Button {
                     viewModel.loadSharedSong()
                 } label: {
@@ -103,7 +103,9 @@ struct ContentView: View {
                         .padding(.horizontal, 12).padding(.vertical, 6)
                 }
                 .buttonStyle(.borderedProminent)
-                Text("리더가 분리해 둔 곡을 바로 엽니다. 새 녹음을 분리하려면 아래에서 파일을 고르세요.")
+                Text(sync.songJobId == nil
+                     ? "서버에 연결되지 않았어요 — 이 기기에 저장된 곡을 엽니다."
+                     : "리더가 분리해 둔 곡을 바로 엽니다. 새 녹음을 분리하려면 아래에서 파일을 고르세요.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             SyncStatusLabel()
