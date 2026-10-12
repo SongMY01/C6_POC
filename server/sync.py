@@ -89,6 +89,10 @@ def _apply(op: dict):
                 f["passedAttemptId"] = p["attemptId"]
             else:
                 f.pop("passedAttemptId", None)
+    elif t == "feedback.confirm":
+        f = _feedback(p["id"])
+        if f is not None and p["by"] not in f.setdefault("confirmedBy", []):
+            f["confirmedBy"].append(p["by"])
     elif t == "attempt.add":
         f = _feedback(p["feedbackId"])
         if f is not None and not any(a["id"] == p["attempt"]["id"] for a in f.setdefault("attempts", [])):

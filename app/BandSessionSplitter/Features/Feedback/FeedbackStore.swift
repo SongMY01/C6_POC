@@ -80,9 +80,20 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
     var comments: [FeedbackComment] = []
     /// 통과 처리된 시도. nil이면 아직 진행 중.
     var passedAttemptId: UUID?
+    /// 피드백 종류 (예전 피드백·"그냥 말로"는 nil일 수 있음). 받는 사람의 연습 방법을 정한다.
+    var kind: FeedbackKind?
+    /// 밸런스 피드백: 리더가 맞춘 목표 믹스 (트랙 id → 볼륨 0~1)
+    var targetMix: [String: Float]?
+    /// 음·연주 피드백: 리더가 받는 세션 트랙 위에 녹음한 시범 (PatchStore의 Patch.id, isReference)
+    var referencePatchId: UUID?
+    /// 약속 피드백: 확인을 누른 사람들 (세션 id 또는 "leader")
+    var confirmedBy: [String] = []
+
+    var plan: PracticePlan { (kind ?? .free).plan }
 
     var status: FeedbackStatus {
         if passedAttemptId != nil { return .passed }
+        if kind == .cue { return isConfirmed ? .passed : .needsPractice }
         if let latest = attempts.last, latest.comments.isEmpty { return .awaitingComment }
         return .needsPractice
     }
@@ -93,6 +104,12 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
 
     var isForAllSessions: Bool { targetSessionIds.isEmpty }
 
+    /// 약속 피드백: 받는 세션이 모두 확인했는지 (전체 대상이면 세션 한 명이라도).
+    var isConfirmed: Bool {
+        if isForAllSessions { return confirmedBy.contains { $0 != FeedbackPeople.leader } }
+        return targetSessionIds.allSatisfy { confirmedBy.contains($0) }
+    }
+
     func isFor(sessionId: String) -> Bool {
         isForAllSessions || targetSessionIds.contains(sessionId)
     }
@@ -102,17 +119,23 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
         attempts.firstIndex { $0.id == attemptId }.map { $0 + 1 }
     }
 
-    init(id: UUID = UUID(), timeRange: ClosedRange<TimeInterval>, text: String, targetSessionIds: [String], createdAt: Date = Date()) {
+    init(id: UUID = UUID(), timeRange: ClosedRange<TimeInterval>, text: String, targetSessionIds: [String],
+         kind: FeedbackKind? = nil, targetMix: [String: Float]? = nil, referencePatchId: UUID? = nil,
+         createdAt: Date = Date()) {
         self.id = id
         self.startTime = timeRange.lowerBound
         self.endTime = timeRange.upperBound
         self.createdAt = createdAt
         self.text = text
         self.targetSessionIds = targetSessionIds
+        self.kind = kind
+        self.targetMix = targetMix
+        self.referencePatchId = referencePatchId
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, startTime, endTime, createdAt, text, targetSessionIds, attempts, comments, passedAttemptId
+        case kind, targetMix, referencePatchId, confirmedBy
         case replies // 예전 형식 (읽기 전용)
     }
 
@@ -130,6 +153,11 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
         attempts = try c.decodeIfPresent([FeedbackAttempt].self, forKey: .attempts) ?? []
         comments = try c.decodeIfPresent([FeedbackComment].self, forKey: .comments) ?? []
         passedAttemptId = try c.decodeIfPresent(UUID.self, forKey: .passedAttemptId)
+        // 모르는 종류(새 버전 앱이 만든 것)는 nil로 읽는다
+        kind = (try? c.decodeIfPresent(String.self, forKey: .kind)).flatMap { $0.flatMap(FeedbackKind.init(rawValue:)) }
+        targetMix = try c.decodeIfPresent([String: Float].self, forKey: .targetMix)
+        referencePatchId = try c.decodeIfPresent(UUID.self, forKey: .referencePatchId)
+        confirmedBy = try c.decodeIfPresent([String].self, forKey: .confirmedBy) ?? []
 
         if attempts.isEmpty, comments.isEmpty,
            let legacy = try c.decodeIfPresent([LegacyReply].self, forKey: .replies) {
@@ -155,6 +183,10 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
         try c.encode(attempts, forKey: .attempts)
         try c.encode(comments, forKey: .comments)
         try c.encodeIfPresent(passedAttemptId, forKey: .passedAttemptId)
+        try c.encodeIfPresent(kind, forKey: .kind)
+        try c.encodeIfPresent(targetMix, forKey: .targetMix)
+        try c.encodeIfPresent(referencePatchId, forKey: .referencePatchId)
+        try c.encode(confirmedBy, forKey: .confirmedBy)
     }
 
     private struct LegacyReply: Decodable {
@@ -212,8 +244,11 @@ final class FeedbackStore: ObservableObject {
     }
 
     @discardableResult
-    func addFeedback(timeRange: ClosedRange<TimeInterval>, text: String, targetSessionIds: [String]) -> FeedbackItem {
-        let item = FeedbackItem(timeRange: timeRange, text: text, targetSessionIds: targetSessionIds)
+    func addFeedback(timeRange: ClosedRange<TimeInterval>, text: String, targetSessionIds: [String],
+                     kind: FeedbackKind? = nil, targetMix: [String: Float]? = nil,
+                     referencePatchId: UUID? = nil) -> FeedbackItem {
+        let item = FeedbackItem(timeRange: timeRange, text: text, targetSessionIds: targetSessionIds,
+                                kind: kind, targetMix: targetMix, referencePatchId: referencePatchId)
         items.append(item)
         items.sort { $0.startTime < $1.startTime }
         persist()
@@ -274,6 +309,14 @@ final class FeedbackStore: ObservableObject {
             }
         }
         sync.send("comment.delete", ["feedbackId": feedbackId.uuidString, "commentId": commentId.uuidString])
+    }
+
+    /// 약속 피드백에 "확인"을 누른다.
+    func confirm(_ feedbackId: UUID, by person: String) {
+        update(feedbackId) { item in
+            if !item.confirmedBy.contains(person) { item.confirmedBy.append(person) }
+        }
+        sync.send("feedback.confirm", ["id": feedbackId.uuidString, "by": person])
     }
 
     /// 시도를 통과 처리한다 (nil이면 다시 열기).

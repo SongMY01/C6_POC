@@ -32,6 +32,11 @@ final class StemTrack: ObservableObject, Identifiable {
     /// 조각마다 따로 두고 "기기 시계의 정확한 시각"으로 미리 예약해 두면, 조각 경계에서
     /// 아무것도 다시 시작할 필요가 없어 다른 트랙에 영향이 없다.
     var originalNodes: [AVAudioPlayerNode] = []
+    /// 이 트랙의 모든 플레이어가 모이는 버스 → 템포 변경 장치(타임스트레치) → 메인 믹서.
+    /// 느리게 연습할 때(템포 사다리)만 rate가 1이 아니고, 평소엔 bypass라 소리에 영향이 없다.
+    let bus = AVAudioMixerNode()
+    let pitch = AVAudioUnitTimePitch()
+    static let busFormat = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
     /// 켜진 패치마다 하나씩 두는 전용 플레이어. 패치(마이크 녹음)는 원본 스템과 채널 수·샘플레이트가
     /// 달라서 원본 플레이어에 그대로 넣으면 형식이 안 맞는다. 패치 파일 형식으로 따로 연결하고 볼륨도 따로 둔다.
     var patchPlayers: [UUID: PatchPlayer] = [:]

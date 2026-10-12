@@ -26,6 +26,18 @@ struct FeedbackThreadSheet: View {
     let onDeleteAttempt: (UUID) -> Void
     /// 시도 통과 처리 (nil이면 다시 열기)
     let onSetPassed: (UUID?) -> Void
+    /// 음·연주 피드백의 리더 시범 녹음 (없으면 nil)
+    let referencePatch: Patch?
+    /// 지금 받는 세션 자리에 시범이 끼워져 있는지
+    let isHearingReference: Bool
+    let onHearReference: (Bool) -> Void
+    /// 밸런스 피드백: 목표 믹스로 듣는 중인지
+    let isHearingTargetMix: Bool
+    let onHearTargetMix: (Bool) -> Void
+    /// 종류가 정한 방법(카운트인 · 템포 사다리 · 목표 믹스)으로 연습 시작 — 시트가 닫힌다
+    let onStartPractice: () -> Void
+    /// 약속 피드백 "확인"
+    let onConfirm: () -> Void
     let onDeleteFeedback: () -> Void
     let onClose: () -> Void
 
@@ -42,6 +54,12 @@ struct FeedbackThreadSheet: View {
         return DeviceRole.isLeader ? targets : targets.filter { $0.id == DeviceRole.current }
     }
 
+    /// 약속 확인은 받는 세션 연주자가 한다 (쓴 리더는 누가 확인했는지만 본다).
+    private var canConfirm: Bool {
+        !DeviceRole.isLeader && item.isFor(sessionId: DeviceRole.current)
+            && !item.confirmedBy.contains(DeviceRole.current)
+    }
+
     /// 통과·다시 열기는 리더만.
     private var canJudge: Bool { DeviceRole.isLeader }
 
@@ -51,6 +69,7 @@ struct FeedbackThreadSheet: View {
         NavigationStack {
             List {
                 feedbackSection
+                practiceSection
 
                 if !item.attempts.isEmpty {
                     compareSection
@@ -61,7 +80,7 @@ struct FeedbackThreadSheet: View {
                     }
                 }
 
-                if item.status == .passed && canJudge {
+                if item.status == .passed && canJudge && item.kind != .cue {
                     Section {
                         Button("다시 열기 (추가 연습 필요)") { onSetPassed(nil) }
                     } footer: {
@@ -69,7 +88,7 @@ struct FeedbackThreadSheet: View {
                     }
                 }
 
-                recordSection
+                if item.kind != .cue { recordSection }
                 commentSection
 
                 Section {
@@ -92,13 +111,19 @@ struct FeedbackThreadSheet: View {
         Section {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
+                    if let kind = item.kind {
+                        Label(kind.label, systemImage: kind.icon)
+                            .font(.subheadline.weight(.bold))
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Capsule().fill(GB.cycle.opacity(0.22)))
+                    }
                     Text("\(formatTime(item.startTime)) ~ \(formatTime(item.endTime))")
                         .font(.subheadline.monospacedDigit().weight(.semibold))
                     Text("→ \(FeedbackPeople.recipients(of: item, tracks: tracks))")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    FeedbackStatusBadge(status: item.status)
+                    FeedbackStatusBadge(item: item)
                 }
                 Text(item.text.isEmpty ? "(내용 없음 — 예전 손글씨 피드백)" : item.text)
                     .foregroundStyle(item.text.isEmpty ? .secondary : .primary)
@@ -113,6 +138,86 @@ struct FeedbackThreadSheet: View {
         } header: {
             Text("피드백")
         }
+    }
+
+    // MARK: 연습하기 (종류별)
+
+    /// 받는 사람이 할 일: 약속이면 "확인"만, 나머지는 종류가 정한 방법으로 "연습 시작".
+    @ViewBuilder
+    private var practiceSection: some View {
+        let plan = item.plan
+        if plan.confirmOnly {
+            Section {
+                if item.confirmedBy.isEmpty {
+                    Text("아직 아무도 확인하지 않았어요").foregroundStyle(.secondary)
+                } else {
+                    Label("\(item.confirmedBy.map { FeedbackPeople.name(of: $0, tracks: tracks) }.joined(separator: ", ")) 확인",
+                          systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                }
+                if canConfirm {
+                    Button(action: onConfirm) {
+                        Label("확인했어요", systemImage: "hand.thumbsup.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                }
+            } header: {
+                Text("약속 확인")
+            } footer: {
+                Text(DeviceRole.isLeader
+                     ? "받는 사람이 확인을 누르면 통과돼요."
+                     : "연습할 건 없어요. 약속을 봤다면 확인만 눌러 주세요.")
+            }
+        } else {
+            Section {
+                if item.kind == .balance, item.targetMix != nil {
+                    Picker("듣기", selection: Binding(get: { isHearingTargetMix }, set: onHearTargetMix)) {
+                        Text("지금 믹스").tag(false)
+                        Text("리더 목표 믹스").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                }
+                if let referencePatch {
+                    Picker("시범", selection: Binding(get: { isHearingReference }, set: onHearReference)) {
+                        Text("원본").tag(false)
+                        Text("리더 시범").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityHint("\(FeedbackPeople.name(of: referencePatch.sessionId, tracks: tracks)) 자리에 시범을 끼워 들어요")
+                }
+                HStack(spacing: 6) {
+                    ForEach(plan.steps(hasReference: referencePatch != nil), id: \.self) { step in
+                        Text(step)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .foregroundStyle(.green)
+                            .background(Capsule().fill(Color.green.opacity(0.15)))
+                    }
+                }
+                Button(action: onStartPractice) {
+                    Label("연습 시작", systemImage: "play.circle.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            } header: {
+                Text("연습하기")
+            } footer: {
+                Text(practiceFooter(plan))
+            }
+        }
+    }
+
+    private func practiceFooter(_ plan: PracticePlan) -> String {
+        if let first = plan.ladder.first, plan.ladder.count > 1 {
+            return "카운트인 뒤 \(Int((first * 100).rounded()))% 속도부터 구간을 두 바퀴씩 돌고, 100%로 한 바퀴 돌면 끝나요."
+        }
+        if plan.usesTargetMix { return "리더가 맞춘 믹스로 구간을 반복해요. 연습 중에도 지금 ↔ 목표를 바꿔 들을 수 있어요." }
+        if plan.countIn { return "카운트인 뒤 원래 속도로 구간을 반복해요." }
+        return "구간을 반복해요."
     }
 
     // MARK: 시도
@@ -304,9 +409,21 @@ struct FeedbackThreadSheet: View {
 /// 상태 배지: 연습 필요(주황) / 코멘트 요청(파랑) / 통과(초록).
 struct FeedbackStatusBadge: View {
     let status: FeedbackStatus
+    var label: String?
+
+    init(status: FeedbackStatus, label: String? = nil) {
+        self.status = status
+        self.label = label
+    }
+
+    /// 약속 피드백은 연습이 아니라 확인을 기다리므로 "확인 필요"로 보여준다.
+    init(item: FeedbackItem) {
+        self.init(status: item.status,
+                  label: item.kind == .cue && item.status != .passed ? "확인 필요" : nil)
+    }
 
     var body: some View {
-        Text(status.label)
+        Text(label ?? status.label)
             .font(.caption2.weight(.bold))
             .padding(.horizontal, 7).padding(.vertical, 3)
             .background(Capsule().fill(status.color.opacity(0.2)))
@@ -346,6 +463,12 @@ struct FeedbackPickerSheet: View {
                 Button { onSelect(item) } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
+                            if let kind = item.kind {
+                                Label(kind.label, systemImage: kind.icon)
+                                    .font(.caption.weight(.bold))
+                                    .padding(.horizontal, 7).padding(.vertical, 3)
+                                    .background(Capsule().fill(GB.cycle.opacity(0.22)))
+                            }
                             Text("\(formatTime(item.startTime))~\(formatTime(item.endTime))")
                                 .font(.subheadline.monospacedDigit().weight(.semibold))
                             Text("→ \(FeedbackPeople.recipients(of: item, tracks: tracks))")
@@ -355,7 +478,7 @@ struct FeedbackPickerSheet: View {
                             if !item.attempts.isEmpty {
                                 Text("시도 \(item.attempts.count)회").font(.caption).foregroundStyle(.secondary)
                             }
-                            FeedbackStatusBadge(status: item.status)
+                            FeedbackStatusBadge(item: item)
                         }
                         Text(item.text.isEmpty ? "(내용 없음)" : item.text)
                             .lineLimit(2)

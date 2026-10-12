@@ -116,10 +116,16 @@ struct FeedbackBoardView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
+                    if let kind = item.kind {
+                        Label(kind.label, systemImage: kind.icon)
+                            .font(.caption.weight(.bold))
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(Capsule().fill(GB.cycle.opacity(0.22)))
+                    }
                     Text(recipientsLabel(item))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.75))
-                    FeedbackStatusBadge(status: item.status)
+                    FeedbackStatusBadge(item: item)
                     if !item.attempts.isEmpty {
                         Text("시도 \(item.attempts.count)회")
                             .font(.caption)

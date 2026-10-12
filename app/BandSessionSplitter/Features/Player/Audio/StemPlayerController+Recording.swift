@@ -102,6 +102,10 @@ extension StemPlayerController {
         recordingMutedTrack = (target, target.isMuted)
         target.isMuted = true
 
+        // 녹음은 원래 속도로만 한다 (느린 재생 중이었다면 되돌림).
+        onLoopWrap = nil
+        setPlaybackRate(1)
+
         // 구간 밖에서도 레퍼런스가 잘리지 않도록 반복은 끄고 한 번만 재생.
         isLoopEnabled = false
         loopRegion = region

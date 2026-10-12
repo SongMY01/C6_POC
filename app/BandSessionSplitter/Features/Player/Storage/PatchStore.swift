@@ -16,6 +16,8 @@ struct Patch: Identifiable, Codable, Equatable {
     /// 곡에 반영된(채택된) 버전인지. 피드백에서 "통과"한 시도의 패치가 채택되고,
     /// 채택된 패치는 곡을 열 때 기본으로 켜진다. 같은 세션에서 구간이 겹치는 채택 패치는 하나뿐.
     var isAdopted: Bool = false
+    /// 리더가 피드백(음·연주)에 붙인 시범 녹음. 세션의 재녹음 버전 목록·레인에는 나오지 않는다.
+    var isReference: Bool = false
 
     var timeRange: ClosedRange<TimeInterval> {
         startTime...endTime
@@ -34,6 +36,7 @@ extension Patch {
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         sourceStart = try c.decodeIfPresent(TimeInterval.self, forKey: .sourceStart) ?? 0
         isAdopted = try c.decodeIfPresent(Bool.self, forKey: .isAdopted) ?? false
+        isReference = try c.decodeIfPresent(Bool.self, forKey: .isReference) ?? false
     }
 }
 
@@ -91,13 +94,15 @@ final class PatchStore: ObservableObject {
 
     /// 임시로 녹음된 파일을 관리 위치로 옮기고 목록에 등록한다.
     @discardableResult
-    func addPatch(sessionId: String, timeRange: ClosedRange<TimeInterval>, tempFileURL: URL) throws -> Patch {
+    func addPatch(sessionId: String, timeRange: ClosedRange<TimeInterval>, tempFileURL: URL,
+                  isReference: Bool = false) throws -> Patch {
         let patch = Patch(
             id: UUID(),
             sessionId: sessionId,
             startTime: timeRange.lowerBound,
             endTime: timeRange.upperBound,
-            createdAt: Date()
+            createdAt: Date(),
+            isReference: isReference
         )
         let dest = fileURL(for: patch)
         try? FileManager.default.removeItem(at: dest)
@@ -154,7 +159,7 @@ final class PatchStore: ObservableObject {
 
     /// 특정 세션의 모든 패치 (최신 순) — 타임라인 레인에 블록으로 그릴 때 쓴다.
     func patches(sessionId: String) -> [Patch] {
-        patches.filter { $0.sessionId == sessionId }
+        patches.filter { $0.sessionId == sessionId && !$0.isReference }
     }
 
     /// 같은 세션·같은 구간 안에서의 버전 번호 (가장 오래된 것이 v1).
@@ -167,7 +172,7 @@ final class PatchStore: ObservableObject {
     /// 특정 세션에서, 주어진 구간과 정확히 일치하는 패치들 (최신 순).
     func patches(sessionId: String, region: ClosedRange<TimeInterval>) -> [Patch] {
         patches.filter {
-            $0.sessionId == sessionId &&
+            $0.sessionId == sessionId && !$0.isReference &&
             abs($0.startTime - region.lowerBound) < 0.05 &&
             abs($0.endTime - region.upperBound) < 0.05
         }
