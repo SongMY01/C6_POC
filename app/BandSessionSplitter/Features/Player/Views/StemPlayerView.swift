@@ -39,6 +39,8 @@ struct StemPlayerView: View {
 
     private enum FeedbackSheet: Identifiable {
         case compose
+        /// 종류별 입력창 목업 (인터페이스 확인용 — 저장·전송 안 함)
+        case typedMock
         case thread(UUID)
         /// 겹치거나 붙어 있는 피드백 묶음에서 고르기
         case picker([UUID])
@@ -46,6 +48,7 @@ struct StemPlayerView: View {
         var id: String {
             switch self {
             case .compose: return "compose"
+            case .typedMock: return "typedMock"
             case .thread(let id): return "thread-\(id)"
             case .picker(let ids): return "picker-\(ids.map(\.uuidString).joined())"
             }
@@ -121,7 +124,8 @@ struct StemPlayerView: View {
                         tracks: controller.tracks,
                         currentTime: controller.currentTime,
                         onOpen: { openFeedback($0) },
-                        onCompose: controller.loopRegion == nil ? nil : { startCompose() }
+                        onCompose: controller.loopRegion == nil ? nil : { startCompose() },
+                        onComposeTyped: { activeSheet = .typedMock }
                     )
                 } else {
                     trackArea
@@ -257,6 +261,12 @@ struct StemPlayerView: View {
             }
             .buttonStyle(GBToolButtonStyle())
             .disabled(controller.loopRegion == nil)
+
+            // 종류별로 쓰기 (목업) — 위 기존 버튼과 따로 동작한다. 구간이 안 잡혀 있어도 열린다.
+            Button { activeSheet = .typedMock } label: {
+                Image(systemName: "wand.and.stars")
+            }
+            .buttonStyle(GBToolButtonStyle())
 
             HStack(spacing: 2) {
                 Button { zoom = max(1, zoom / 1.5) } label: { Image(systemName: "minus.magnifyingglass") }
@@ -573,6 +583,13 @@ struct StemPlayerView: View {
 
     // MARK: - 피드백 시트 (작성 / 스레드 / 묶음 목록)
 
+    /// 목업 시트에 보여 줄 구간: 잡혀 있는 구간 반복, 없으면 지금 위치부터 8초.
+    private var mockFeedbackRange: ClosedRange<TimeInterval> {
+        if let region = controller.loopRegion { return region }
+        let start = min(controller.currentTime, max(0, controller.duration - 8))
+        return start...(start + 8)
+    }
+
     @ViewBuilder
     private func feedbackSheet(_ sheet: FeedbackSheet) -> some View {
         switch sheet {
@@ -589,6 +606,14 @@ struct StemPlayerView: View {
                     onDeleteReference: deleteDraftReference
                 )
             }
+        case .typedMock:
+            TypedFeedbackMockSheet(
+                timeRange: mockFeedbackRange,
+                tracks: controller.tracks,
+                onClose: { activeSheet = nil }
+            )
+            .presentationDetents([.large])
+            .modifier(LargePageSheet())
         case .picker(let ids):
             FeedbackPickerSheet(
                 items: ids.compactMap { feedbackStore.item(id: $0) },
@@ -978,3 +1003,13 @@ struct StemPlayerView: View {
     }
 }
 
+/// iPad에서 시트를 큰 페이지 크기로 연다 (내용이 긴 시트용). iOS 18 미만에서는 기본 크기.
+private struct LargePageSheet: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.presentationSizing(.page)
+        } else {
+            content
+        }
+    }
+}
