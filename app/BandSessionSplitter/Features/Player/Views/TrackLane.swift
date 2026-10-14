@@ -25,13 +25,14 @@ struct TrackLane: View {
     let onTrimRegionStart: (UUID, TimeInterval) -> Void
     let onTrimRegionEnd: (UUID, TimeInterval) -> Void
 
-    /// 이 세션을 콕 집어 받는 사람으로 지정한 피드백 (전체 대상 피드백은 눈금자 깃발로만 표시).
+    /// 이 세션이 받는 피드백 (전체 대상 포함).
     let feedbacks: [FeedbackItem]
     let selectedFeedbackId: UUID?
     let onTapFeedbackCluster: (FeedbackCluster) -> Void
 
-    /// 말풍선 최대 폭. 이보다 가까운 피드백은 하나로 묶어 "💬 N개"로 보여준다.
+    /// 말풍선 최대 폭. 겹치는 피드백은 아래 줄로 쌓고, maxMarkerRows줄을 넘으면 "💬 N개"로 묶는다.
     private let feedbackMarkerWidth: CGFloat = 180
+    private var maxMarkerRows: Int { min(4, max(1, Int((height - 90) / 28))) }  // 아래쪽 패치 블록은 가리지 않게
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -52,7 +53,7 @@ struct TrackLane: View {
                 patchClip(patch)
             }
 
-            ForEach(FeedbackCluster.make(feedbacks, pxPerSec: pxPerSec, minSpacing: feedbackMarkerWidth)) { cluster in
+            ForEach(FeedbackCluster.stacked(feedbacks, pxPerSec: pxPerSec, markerWidth: feedbackMarkerWidth, maxRows: maxMarkerRows)) { cluster in
                 feedbackMarker(cluster)
             }
         }
@@ -181,7 +182,7 @@ extension TrackLane {
             .background(Capsule().fill(fill))
         }
         .buttonStyle(.plain)
-        .offset(x: CGFloat(cluster.start) * pxPerSec, y: 26)
+        .offset(x: CGFloat(cluster.start) * pxPerSec, y: 26 + CGFloat(cluster.row) * 28)
     }
 }
 

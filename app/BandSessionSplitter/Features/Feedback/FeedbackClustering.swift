@@ -6,7 +6,9 @@ import Foundation
 /// 그래서 "화면상 거리(초 × 줌 배율)"가 minSpacing보다 가까우면 한 묶음으로 보여주고
 /// ("💬 3"), 탭하면 목록에서 고르게 한다. 확대하면 거리가 벌어져 저절로 다시 풀린다.
 struct FeedbackCluster: Identifiable {
-    let items: [FeedbackItem]
+    var items: [FeedbackItem]
+    /// 트랙 레인에서 몇 번째 줄에 놓이는지 (겹치는 말풍선은 아래 줄로 쌓는다)
+    var row = 0
     var id: UUID { items[0].id }
     var start: TimeInterval { items[0].startTime }
     var isSingle: Bool { items.count == 1 }
@@ -23,6 +25,25 @@ struct FeedbackCluster: Identifiable {
                 clusters.append([item])
             }
         }
-        return clusters.map(FeedbackCluster.init(items:))
+        return clusters.map { FeedbackCluster(items: $0) }
+    }
+
+    /// 트랙 레인용: 말풍선이 겹치면 묶지 않고 아래 줄로 쌓아서 하나씩 보이게 한다.
+    /// 줄이 maxRows개를 넘을 때만 마지막 줄의 말풍선에 묶는다 ("피드백 N개").
+    static func stacked(_ items: [FeedbackItem], pxPerSec: CGFloat, markerWidth: CGFloat, maxRows: Int) -> [FeedbackCluster] {
+        var placed: [FeedbackCluster] = []
+        var rowEnds: [CGFloat] = Array(repeating: -.infinity, count: maxRows)
+        var lastInRow: [Int?] = Array(repeating: nil, count: maxRows)
+        for item in items.sorted(by: { $0.startTime < $1.startTime }) {
+            let x = CGFloat(item.startTime) * pxPerSec
+            if let row = rowEnds.firstIndex(where: { $0 <= x }) {
+                placed.append(FeedbackCluster(items: [item], row: row))
+                rowEnds[row] = x + markerWidth + 4
+                lastInRow[row] = placed.count - 1
+            } else if let index = lastInRow[maxRows - 1] {
+                placed[index].items.append(item)
+            }
+        }
+        return placed
     }
 }
