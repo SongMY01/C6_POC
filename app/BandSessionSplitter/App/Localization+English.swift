@@ -137,7 +137,6 @@ let englishStrings: [String: String] = [
     "이 Mac": "This Mac",
     "이 iPad는": "This iPad is",
     "이 구간의 피드백 %@개": "Feedback in this section: %@",
-    "이 피드백 구간을 준비 시간 2초 뒤부터 녹음합니다. 올리면 새 시도로 추가되고 코멘트 요청 상태가 됩니다.": "Recording starts 2 seconds after you begin, over this feedback section. Uploading adds a new attempt and sets the status to awaiting comment.",
     "이렇게 시작해 보세요": "Try starting like this",
     "이미 녹음한 패치로 올리기": "Upload an existing patch",
     "일렉기타": "Guitar",
@@ -165,7 +164,6 @@ let englishStrings: [String: String] = [
     "코멘트 삭제": "Delete Comment",
     "코멘트 없음": "No comments",
     "코멘트 요청": "Awaiting comment",
-    "코멘트를 기다리는 중": "Waiting for comments",
     "타임라인에서 구간을 잡고 새 피드백을 남겨 보세요.": "Select a section on the timeline and leave new feedback.",
     "템포 기준으로 초기화": "Reset to tempo estimate",
     "템포 추정": "Tempo estimate",
@@ -253,4 +251,6 @@ let englishStrings: [String: String] = [
     "목표 믹스로 구간 반복 · 지금 ↔ 목표 바꿔 듣기": "Loop the section with the target mix · switch between current and target",
     "카운트인 → 70% · 85% · 100% 속도로 구간 반복": "Count-in → loop the section at 70% · 85% · 100% speed",
     "카운트인 → 고른 느낌을 떠올리며 구간 반복": "Count-in → loop the section with the chosen feel in mind",
+    "%@의 코멘트를 기다리는 중": "Waiting for a comment from %@",
+    "이 피드백 구간을 준비 시간 2초 뒤부터 녹음합니다. 올리면 새 시도로 추가되고, 피드백을 준 %@에게 코멘트를 요청해요.": "Recording starts 2 seconds after you begin, over this feedback section. Uploading adds a new attempt and asks %@, who gave the feedback, for a comment.",
 ]

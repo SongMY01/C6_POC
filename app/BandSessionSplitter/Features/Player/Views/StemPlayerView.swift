@@ -76,14 +76,12 @@ struct StemPlayerView: View {
     }
 
     /// 피드백 버튼 배지 숫자 = 이 iPad 사람이 지금 해야 할 일.
-    /// 리더: 코멘트를 기다리는 시도 수 / 세션 연주자: 내 세션의 "연습 필요" 수.
+    /// 내가 준 피드백 중 내 코멘트를 기다리는 것 + (세션 연주자면) 내 세션의 "연습 필요".
     private var awaitingCommentCount: Int {
-        if DeviceRole.isLeader {
-            return feedbackStore.items.filter { $0.status == .awaitingComment }.count
-        }
-        return feedbackStore.items.filter {
-            $0.status == .needsPractice && $0.isFor(sessionId: DeviceRole.current)
-        }.count
+        let me = DeviceRole.current
+        let toComment = feedbackStore.items.filter { $0.status == .awaitingComment && $0.author == me }.count
+        if DeviceRole.isLeader { return toComment }
+        return toComment + feedbackStore.items.filter { $0.status == .needsPractice && $0.isFor(sessionId: me) }.count
     }
 
     private let headerWidth: CGFloat = 280
@@ -809,7 +807,8 @@ struct StemPlayerView: View {
             targetSessionIds: controller.tracks.map(\.id).filter { feedback.targets.contains($0) },
             kind: feedback.kind,
             targetMix: feedback.targetMix,
-            translations: feedback.translations
+            translations: feedback.translations,
+            author: DeviceRole.current
         )
         selectedFeedbackId = item.id
         activeSheet = nil

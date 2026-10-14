@@ -78,6 +78,9 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
     var endTime: TimeInterval
     var createdAt: Date
     var text: String
+    /// 피드백을 준 사람 ("leader" 또는 세션 id). 코멘트 요청은 이 사람에게 가고, 통과·다시 열기도 이 사람이 한다.
+    /// 예전 피드백(필드 없음)은 리더가 준 것으로 본다.
+    var author: String = FeedbackPeople.leader
     /// 다른 언어 번역 ("en"/"ko" → 문장). 두 언어를 다 갖고 있을 때만 있다.
     var translations: [String: String]?
     /// 받는 세션 id(StemTrack.id: "bass" 등). 비어 있으면 전체 세션에게 보낸 피드백.
@@ -105,7 +108,8 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
     var status: FeedbackStatus {
         if passedAttemptId != nil { return .passed }
         if kind == .cue { return isConfirmed ? .passed : .needsPractice }
-        if let latest = attempts.last, latest.comments.isEmpty { return .awaitingComment }
+        // 최신 시도에 피드백 준 사람이 아직 코멘트를 안 달았으면 그 사람의 코멘트를 기다린다 (다른 사람 댓글은 상관없음)
+        if let latest = attempts.last, !latest.comments.contains(where: { $0.author == author }) { return .awaitingComment }
         return .needsPractice
     }
 
@@ -145,7 +149,7 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, startTime, endTime, createdAt, text, translations, targetSessionIds, attempts, comments, passedAttemptId
+        case id, startTime, endTime, createdAt, text, author, translations, targetSessionIds, attempts, comments, passedAttemptId
         case kind, targetMix, referencePatchId, confirmedBy
         case replies // 예전 형식 (읽기 전용)
     }
@@ -161,6 +165,7 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
         translations = try c.decodeIfPresent([String: String].self, forKey: .translations)
+        author = try c.decodeIfPresent(String.self, forKey: .author) ?? FeedbackPeople.leader
         targetSessionIds = try c.decodeIfPresent([String].self, forKey: .targetSessionIds) ?? []
         attempts = try c.decodeIfPresent([FeedbackAttempt].self, forKey: .attempts) ?? []
         comments = try c.decodeIfPresent([FeedbackComment].self, forKey: .comments) ?? []
@@ -191,6 +196,7 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
         try c.encode(endTime, forKey: .endTime)
         try c.encode(createdAt, forKey: .createdAt)
         try c.encode(text, forKey: .text)
+        try c.encode(author, forKey: .author)
         try c.encodeIfPresent(translations, forKey: .translations)
         try c.encode(targetSessionIds, forKey: .targetSessionIds)
         try c.encode(attempts, forKey: .attempts)
@@ -259,10 +265,12 @@ final class FeedbackStore: ObservableObject {
     @discardableResult
     func addFeedback(timeRange: ClosedRange<TimeInterval>, text: String, targetSessionIds: [String],
                      kind: FeedbackKind? = nil, targetMix: [String: Float]? = nil,
-                     referencePatchId: UUID? = nil, translations: [String: String]? = nil) -> FeedbackItem {
+                     referencePatchId: UUID? = nil, translations: [String: String]? = nil,
+                     author: String = FeedbackPeople.leader) -> FeedbackItem {
         var item = FeedbackItem(timeRange: timeRange, text: text, targetSessionIds: targetSessionIds,
                                 kind: kind, targetMix: targetMix, referencePatchId: referencePatchId)
         item.translations = translations
+        item.author = author
         items.append(item)
         items.sort { $0.startTime < $1.startTime }
         persist()

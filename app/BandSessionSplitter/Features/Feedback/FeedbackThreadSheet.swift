@@ -60,8 +60,10 @@ struct FeedbackThreadSheet: View {
             && !item.confirmedBy.contains(DeviceRole.current)
     }
 
-    /// 통과·다시 열기는 리더만.
-    private var canJudge: Bool { DeviceRole.isLeader }
+    /// 통과·다시 열기는 피드백을 준 사람만.
+    private var canJudge: Bool { DeviceRole.current == item.author }
+
+    private var authorName: String { FeedbackPeople.name(of: item.author, tracks: tracks) }
 
     private var latestAttempt: FeedbackAttempt? { item.attempts.last }
 
@@ -119,7 +121,7 @@ struct FeedbackThreadSheet: View {
                     }
                     Text("\(formatTime(item.startTime)) ~ \(formatTime(item.endTime))")
                         .font(.subheadline.monospacedDigit().weight(.semibold))
-                    Text("→ \(FeedbackPeople.recipients(of: item, tracks: tracks))")
+                    Text("\(authorName) → \(FeedbackPeople.recipients(of: item, tracks: tracks))")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -229,7 +231,7 @@ struct FeedbackThreadSheet: View {
             attemptHeader(attempt, number: number, isLatest: isLatest, isExpanded: isExpanded)
             if isExpanded {
                 if attempt.comments.isEmpty {
-                    Text(isLatest && item.status == .awaitingComment ? L("코멘트를 기다리는 중") : L("코멘트 없음"))
+                    Text(isLatest && item.status == .awaitingComment ? L("\(authorName)의 코멘트를 기다리는 중") : L("코멘트 없음"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.leading, 40)
@@ -372,7 +374,7 @@ struct FeedbackThreadSheet: View {
         } header: {
             Text(item.attempts.isEmpty ? L("연습해서 올리기") : L("다시 연습해서 올리기"))
         } footer: {
-            Text(L("이 피드백 구간을 준비 시간 2초 뒤부터 녹음합니다. 올리면 새 시도로 추가되고 코멘트 요청 상태가 됩니다."))
+            Text(L("이 피드백 구간을 준비 시간 2초 뒤부터 녹음합니다. 올리면 새 시도로 추가되고, 피드백을 준 \(authorName)에게 코멘트를 요청해요."))
         }
     }
 
