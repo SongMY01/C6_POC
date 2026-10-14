@@ -78,8 +78,11 @@ struct FeedbackComposerSheet: View {
     @State private var beatMarks: [Int: BeatMark] = [:]
 
     // 볼륨·밸런스
-    @State private var hearingFixed = false             // false: 지금 믹스, true: 고친 믹스
+    /// true: 페이더대로 고친 믹스로 듣기(기본), false: 원래 믹스로 듣기 (비교용)
+    @State private var hearingFixed = true
     @State private var originalVolumes: [String: Float] = [:]
+    /// 재녹음(패치) 구간 소리의 원래 볼륨 — 고친 믹스는 패치 소리에도 똑같이 적용한다.
+    @State private var originalPatchVolumes: [String: Float] = [:]
     /// 열기 전 구간반복 상태. 닫을 때 되돌린다 (작성 화면이 곡의 구간 설정을 바꿔 놓지 않게).
     @State private var savedLoop: (region: ClosedRange<TimeInterval>?, enabled: Bool)?
     @State private var fader: [String: Double] = [:]   // 파트별 0(묻힘) ~ 0.5(적당) ~ 1(튐). 건드린 파트만 들어 있다.
@@ -130,6 +133,7 @@ struct FeedbackComposerSheet: View {
             }
             .onAppear {
                 originalVolumes = Dictionary(uniqueKeysWithValues: tracks.map { ($0.id, $0.volume) })
+                originalPatchVolumes = Dictionary(uniqueKeysWithValues: tracks.map { ($0.id, $0.patchVolume) })
                 savedLoop = (controller.loopRegion, controller.isLoopEnabled)
             }
             .onDisappear {
@@ -142,6 +146,7 @@ struct FeedbackComposerSheet: View {
             }
             .onChange(of: fader) { _, _ in applyHearing() }
             .onChange(of: hearingFixed) { _, _ in applyHearing() }
+            .onChange(of: kind) { _, _ in applyHearing() }
         }
     }
 
@@ -305,8 +310,8 @@ struct FeedbackComposerSheet: View {
             Text(L("이렇게 고치면 들려요")).font(.subheadline.weight(.semibold))
             HStack(spacing: 10) {
                 Picker(L("듣기"), selection: $hearingFixed) {
-                    Text(L("지금 믹스")).tag(false)
                     Text(L("고친 믹스")).tag(true)
+                    Text(L("원래 믹스")).tag(false)
                 }
                 .pickerStyle(.segmented)
                 Button(action: playRegion) {
@@ -562,7 +567,7 @@ struct FeedbackComposerSheet: View {
     private func fixedMix() -> [String: Float] {
         let raw = tracks.map { track -> (String, Float) in
             let position = Float(fader[track.id] ?? 0.5)
-            return (track.id, (originalVolumes[track.id] ?? track.volume) * (1 + (0.5 - position)))
+            return (track.id, (originalVolumes[track.id] ?? track.volume) * gain(at: position))
         }
         let peak = max(1, raw.map(\.1).max() ?? 1)
         return Dictionary(uniqueKeysWithValues: raw.map { ($0.0, $0.1 / peak) })
@@ -577,16 +582,28 @@ struct FeedbackComposerSheet: View {
         controller.play()
     }
 
-    /// 고친 믹스: 묻힌 파트는 키우고 튀는 파트는 줄인다 (가운데 = 그대로). 합이 1을 넘으면 전체를 낮춰 맞춘다.
+    /// 페이더 위치 → 볼륨 배율. 묻힘 끝 2배 ↔ 가운데 그대로 ↔ 튐 끝 0.3배 (차이가 귀에 들리게).
+    private func gain(at position: Float) -> Float {
+        position < 0.5 ? 1 + (0.5 - position) * 2 : 1 - (position - 0.5) * 1.4
+    }
+
+    /// 볼륨·밸런스를 쓰는 동안은 페이더대로 고친 믹스가 바로 들린다 ("지금 믹스"를 고르면 원래대로).
+    /// 원본 소리와 재녹음(패치) 소리 모두에 같은 비율을 적용한다.
     private func applyHearing() {
-        guard hearingFixed else { restoreVolumes(); return }
+        guard kind == .balance, hearingFixed, !fader.isEmpty else { restoreVolumes(); return }
         let mix = fixedMix()
-        for track in tracks { if let volume = mix[track.id] { track.volume = volume } }
+        for track in tracks {
+            guard let volume = mix[track.id], let original = originalVolumes[track.id] else { continue }
+            track.volume = volume
+            let ratio = original > 0 ? volume / original : 1
+            track.patchVolume = min(1, (originalPatchVolumes[track.id] ?? track.patchVolume) * ratio)
+        }
     }
 
     private func restoreVolumes() {
         for track in tracks {
             if let volume = originalVolumes[track.id] { track.volume = volume }
+            if let volume = originalPatchVolumes[track.id] { track.patchVolume = volume }
         }
     }
 
