@@ -23,17 +23,19 @@ struct ServerCandidate: Identifiable {
 }
 
 #if targetEnvironment(simulator)
-let serverCandidates = [ServerCandidate(name: "이 Mac", url: "http://127.0.0.1:8756")]
+var serverCandidates: [ServerCandidate] { [ServerCandidate(name: L("이 Mac"), url: "http://127.0.0.1:8756")] }
 #else
-let serverCandidates = [
-    ServerCandidate(name: "집 Wi-Fi", url: "http://192.168.0.5:8756"),
-    ServerCandidate(name: "학교", url: "http://10.141.52.89:8756"),
+var serverCandidates: [ServerCandidate] { [
+    // ngrok 고정 도메인: 어느 네트워크에서든 접속 (Mac에서 ngrok 터널이 켜져 있어야 함)
+    ServerCandidate(name: "ngrok", url: "https://waltz-provoke-manatee.ngrok-free.dev"),
+    ServerCandidate(name: L("집 Wi-Fi"), url: "http://192.168.0.5:8756"),
+    ServerCandidate(name: L("학교"), url: "http://10.141.52.89:8756"),
     // Mac의 "인터넷 공유"로 Mac이 직접 Wi-Fi를 만들 때 Mac 주소
-    ServerCandidate(name: "Mac 인터넷 공유", url: "http://192.168.2.1:8756"),
+    ServerCandidate(name: L("Mac 인터넷 공유"), url: "http://192.168.2.1:8756"),
 ] + (2...14).map {
     // iPhone 개인용 핫스팟은 연결된 기기에 172.20.10.2~14를 나눠준다 (유저테스트 현장용)
-    ServerCandidate(name: "핫스팟", url: "http://172.20.10.\($0):8756")
-}
+    ServerCandidate(name: L("핫스팟"), url: "http://172.20.10.\($0):8756")
+} }
 #endif
 
 @MainActor
@@ -58,7 +60,7 @@ final class SessionViewModel: ObservableObject {
     func setManualServer(_ url: String) {
         serverURLText = url
         isManualServer = true
-        serverStatus = "직접 입력한 주소 사용"
+        serverStatus = L("직접 입력한 주소 사용")
         connectSync()
     }
 
@@ -72,13 +74,13 @@ final class SessionViewModel: ObservableObject {
     /// 후보들 중 지금 응답하는 서버를 찾아 고른다. 모두 응답이 없으면 주소는 그대로 둔다.
     func detectServer() async {
         isManualServer = false
-        serverStatus = "서버 찾는 중…"
+        serverStatus = L("서버 찾는 중…")
         if let found = await Self.firstReachable(serverCandidates) {
             serverURLText = found.url
-            serverStatus = "\(found.name) 서버 연결됨"
+            serverStatus = L("\(found.name) 서버 연결됨")
             connectSync()
         } else {
-            serverStatus = "응답하는 서버 없음 — 서버가 켜져 있는지, 같은 Wi-Fi인지 확인"
+            serverStatus = L("응답하는 서버 없음 — 서버가 켜져 있는지, 같은 Wi-Fi인지 확인")
         }
     }
 
@@ -155,7 +157,7 @@ final class SessionViewModel: ObservableObject {
             case .done:
                 return
             case .error:
-                throw SeparationError.serverError(status.error ?? "알 수 없는 오류")
+                throw SeparationError.serverError(status.error ?? L("알 수 없는 오류"))
             case .queued, .processing:
                 try await Task.sleep(nanoseconds: 1_500_000_000)
             }

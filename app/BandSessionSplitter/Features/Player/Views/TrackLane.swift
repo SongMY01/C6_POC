@@ -167,10 +167,10 @@ extension TrackLane {
                 }())
                 if cluster.isSingle {
                     let item = cluster.items[0]
-                    Text(item.status == .needsPractice ? item.text : "\(item.status.label) · \(item.text)")
+                    Text(item.status == .needsPractice ? item.displayText : "\(item.status.label) · \(item.displayText)")
                         .lineLimit(1)
                 } else {
-                    Text("피드백 \(cluster.items.count)개")
+                    Text(L("피드백 \(cluster.items.count)개"))
                 }
             }
             .font(.system(size: 11, weight: .semibold))

@@ -31,7 +31,7 @@ struct PracticeBar: View {
     private var title: some View {
         HStack(spacing: 6) {
             if let kind { Image(systemName: kind.icon) }
-            Text("\(kind?.label ?? "구간") 연습")
+            Text(L("\(kind?.label ?? L("구간")) 연습"))
             if let region = session.region {
                 Text("\(formatTime(region.lowerBound))~\(formatTime(region.upperBound))")
                     .font(.system(size: 13, weight: .medium, design: .monospaced))
@@ -55,12 +55,12 @@ struct PracticeBar: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.white.opacity(0.7))
             } else {
-                Text("반복 중").font(.system(size: 13)).foregroundStyle(.white.opacity(0.7))
+                Text(L("반복 중")).font(.system(size: 13)).foregroundStyle(.white.opacity(0.7))
             }
             if let hearingTargetMix {
-                Picker("믹스", selection: hearingTargetMix) {
-                    Text("지금 믹스").tag(false)
-                    Text("목표 믹스").tag(true)
+                Picker(L("믹스"), selection: hearingTargetMix) {
+                    Text(L("지금 믹스")).tag(false)
+                    Text(L("목표 믹스")).tag(true)
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 210)
@@ -69,10 +69,10 @@ struct PracticeBar: View {
             if canRecord {
                 Button {
                     onRecord()
-                } label: { Label("녹음", systemImage: "record.circle") }
+                } label: { Label(L("녹음"), systemImage: "record.circle") }
                     .buttonStyle(GBToolButtonStyle())
             }
-            Button("그만") { session.stop() }
+            Button(L("그만")) { session.stop() }
                 .buttonStyle(GBToolButtonStyle())
         }
     }
@@ -97,24 +97,24 @@ struct PracticeBar: View {
 
     private var loopText: String {
         guard session.phase == .running else { return "" }
-        return "\(min(session.loopsDone + 1, session.loopsNeeded))/\(session.loopsNeeded)바퀴"
+        return L("\(min(session.loopsDone + 1, session.loopsNeeded))/\(session.loopsNeeded)바퀴")
     }
 
     private var finishedContent: some View {
         HStack(spacing: 14) {
-            Text("👏 100%까지 해봤어요")
+            Text(L("👏 100%까지 해봤어요"))
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(.white)
             Spacer(minLength: 8)
-            Button("한 번 더") { session.restart() }
+            Button(L("한 번 더")) { session.restart() }
                 .buttonStyle(GBToolButtonStyle())
             if canRecord {
                 Button {
                     onRecord()
-                } label: { Label("녹음해서 올리기", systemImage: "record.circle") }
+                } label: { Label(L("녹음해서 올리기"), systemImage: "record.circle") }
                     .buttonStyle(GBToolButtonStyle())
             }
-            Button("닫기") { session.stop() }
+            Button(L("닫기")) { session.stop() }
                 .buttonStyle(GBToolButtonStyle())
         }
     }
@@ -135,7 +135,7 @@ struct CountInOverlay: View {
                         .id(beat)
                         .transition(.scale.combined(with: .opacity))
                     if session.hasLadder {
-                        Text("\(Int((session.currentRate * 100).rounded()))% 속도로 시작해요")
+                        Text(L("\(Int((session.currentRate * 100).rounded()))% 속도로 시작해요"))
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.85))
                     }

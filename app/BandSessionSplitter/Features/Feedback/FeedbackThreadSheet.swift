@@ -73,7 +73,7 @@ struct FeedbackThreadSheet: View {
 
                 if !item.attempts.isEmpty {
                     compareSection
-                    Section("시도 \(item.attempts.count)회") {
+                    Section(L("시도 \(item.attempts.count)회")) {
                         ForEach(Array(item.attempts.enumerated()), id: \.element.id) { index, attempt in
                             attemptView(attempt, number: index + 1, isLatest: attempt.id == latestAttempt?.id)
                         }
@@ -82,9 +82,9 @@ struct FeedbackThreadSheet: View {
 
                 if item.status == .passed && canJudge && item.kind != .cue {
                     Section {
-                        Button("다시 열기 (추가 연습 필요)") { onSetPassed(nil) }
+                        Button(L("다시 열기 (추가 연습 필요)")) { onSetPassed(nil) }
                     } footer: {
-                        Text("통과한 시도의 녹음이 곡에 반영되어 있습니다. 다시 열면 원본으로 돌아갑니다. 새 시도를 올리면 피드백이 다시 열리지만, 새 시도가 통과할 때까지는 지금 반영된 녹음이 유지됩니다.")
+                        Text(L("통과한 시도의 녹음이 곡에 반영되어 있습니다. 다시 열면 원본으로 돌아갑니다. 새 시도를 올리면 피드백이 다시 열리지만, 새 시도가 통과할 때까지는 지금 반영된 녹음이 유지됩니다."))
                     }
                 }
 
@@ -92,14 +92,14 @@ struct FeedbackThreadSheet: View {
                 commentSection
 
                 Section {
-                    Button("피드백 삭제", role: .destructive, action: onDeleteFeedback)
+                    Button(L("피드백 삭제"), role: .destructive, action: onDeleteFeedback)
                 }
             }
-            .navigationTitle("피드백")
+            .navigationTitle(L("피드백"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("닫기", action: onClose)
+                    Button(L("닫기"), action: onClose)
                 }
             }
         }
@@ -125,7 +125,7 @@ struct FeedbackThreadSheet: View {
                     Spacer()
                     FeedbackStatusBadge(item: item)
                 }
-                Text(item.text.isEmpty ? "(내용 없음 — 예전 손글씨 피드백)" : item.text)
+                Text(item.text.isEmpty ? L("(내용 없음 — 예전 손글씨 피드백)") : item.displayText)
                     .foregroundStyle(item.text.isEmpty ? .secondary : .primary)
                 Text(item.createdAt, format: .dateTime.month().day().hour().minute())
                     .font(.caption)
@@ -136,7 +136,7 @@ struct FeedbackThreadSheet: View {
                 commentRow(comment)
             }
         } header: {
-            Text("피드백")
+            Text(L("피드백"))
         }
     }
 
@@ -149,15 +149,15 @@ struct FeedbackThreadSheet: View {
         if plan.confirmOnly {
             Section {
                 if item.confirmedBy.isEmpty {
-                    Text("아직 아무도 확인하지 않았어요").foregroundStyle(.secondary)
+                    Text(L("아직 아무도 확인하지 않았어요")).foregroundStyle(.secondary)
                 } else {
-                    Label("\(item.confirmedBy.map { FeedbackPeople.name(of: $0, tracks: tracks) }.joined(separator: ", ")) 확인",
+                    Label(L("\(item.confirmedBy.map { FeedbackPeople.name(of: $0, tracks: tracks) }.joined(separator: ", ")) 확인"),
                           systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                 }
                 if canConfirm {
                     Button(action: onConfirm) {
-                        Label("확인했어요", systemImage: "hand.thumbsup.fill")
+                        Label(L("확인했어요"), systemImage: "hand.thumbsup.fill")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                     }
@@ -165,28 +165,28 @@ struct FeedbackThreadSheet: View {
                     .tint(.green)
                 }
             } header: {
-                Text("약속 확인")
+                Text(L("약속 확인"))
             } footer: {
                 Text(DeviceRole.isLeader
-                     ? "받는 사람이 확인을 누르면 통과돼요."
-                     : "연습할 건 없어요. 약속을 봤다면 확인만 눌러 주세요.")
+                     ? L("받는 사람이 확인을 누르면 통과돼요.")
+                     : L("연습할 건 없어요. 약속을 봤다면 확인만 눌러 주세요."))
             }
         } else {
             Section {
                 if item.kind == .balance, item.targetMix != nil {
-                    Picker("듣기", selection: Binding(get: { isHearingTargetMix }, set: onHearTargetMix)) {
-                        Text("지금 믹스").tag(false)
-                        Text("리더 목표 믹스").tag(true)
+                    Picker(L("듣기"), selection: Binding(get: { isHearingTargetMix }, set: onHearTargetMix)) {
+                        Text(L("지금 믹스")).tag(false)
+                        Text(L("리더 목표 믹스")).tag(true)
                     }
                     .pickerStyle(.segmented)
                 }
                 if let referencePatch {
-                    Picker("시범", selection: Binding(get: { isHearingReference }, set: onHearReference)) {
-                        Text("원본").tag(false)
-                        Text("리더 시범").tag(true)
+                    Picker(L("시범"), selection: Binding(get: { isHearingReference }, set: onHearReference)) {
+                        Text(L("원본")).tag(false)
+                        Text(L("리더 시범")).tag(true)
                     }
                     .pickerStyle(.segmented)
-                    .accessibilityHint("\(FeedbackPeople.name(of: referencePatch.sessionId, tracks: tracks)) 자리에 시범을 끼워 들어요")
+                    .accessibilityHint(L("\(FeedbackPeople.name(of: referencePatch.sessionId, tracks: tracks)) 자리에 시범을 끼워 들어요"))
                 }
                 HStack(spacing: 6) {
                     ForEach(plan.steps(hasReference: referencePatch != nil), id: \.self) { step in
@@ -198,13 +198,13 @@ struct FeedbackThreadSheet: View {
                     }
                 }
                 Button(action: onStartPractice) {
-                    Label("연습 시작", systemImage: "play.circle.fill")
+                    Label(L("연습 시작"), systemImage: "play.circle.fill")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
             } header: {
-                Text("연습하기")
+                Text(L("연습하기"))
             } footer: {
                 Text(practiceFooter(plan))
             }
@@ -213,11 +213,11 @@ struct FeedbackThreadSheet: View {
 
     private func practiceFooter(_ plan: PracticePlan) -> String {
         if let first = plan.ladder.first, plan.ladder.count > 1 {
-            return "카운트인 뒤 \(Int((first * 100).rounded()))% 속도부터 구간을 두 바퀴씩 돌고, 100%로 한 바퀴 돌면 끝나요."
+            return L("카운트인 뒤 \(Int((first * 100).rounded()))% 속도부터 구간을 두 바퀴씩 돌고, 100%로 한 바퀴 돌면 끝나요.")
         }
-        if plan.usesTargetMix { return "리더가 맞춘 믹스로 구간을 반복해요. 연습 중에도 지금 ↔ 목표를 바꿔 들을 수 있어요." }
-        if plan.countIn { return "카운트인 뒤 원래 속도로 구간을 반복해요." }
-        return "구간을 반복해요."
+        if plan.usesTargetMix { return L("리더가 맞춘 믹스로 구간을 반복해요. 연습 중에도 지금 ↔ 목표를 바꿔 들을 수 있어요.") }
+        if plan.countIn { return L("카운트인 뒤 원래 속도로 구간을 반복해요.") }
+        return L("구간을 반복해요.")
     }
 
     // MARK: 시도
@@ -229,7 +229,7 @@ struct FeedbackThreadSheet: View {
             attemptHeader(attempt, number: number, isLatest: isLatest, isExpanded: isExpanded)
             if isExpanded {
                 if attempt.comments.isEmpty {
-                    Text(isLatest && item.status == .awaitingComment ? "코멘트를 기다리는 중" : "코멘트 없음")
+                    Text(isLatest && item.status == .awaitingComment ? L("코멘트를 기다리는 중") : L("코멘트 없음"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.leading, 40)
@@ -242,7 +242,7 @@ struct FeedbackThreadSheet: View {
         }
         .padding(.vertical, 4)
         .contextMenu {
-            Button("시도 삭제", role: .destructive) { onDeleteAttempt(attempt.id) }
+            Button(L("시도 삭제"), role: .destructive) { onDeleteAttempt(attempt.id) }
         }
     }
 
@@ -255,14 +255,14 @@ struct FeedbackThreadSheet: View {
                 .foregroundStyle(isPassed ? .green : .red)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text("\(number)차 시도")
+                    Text(L("\(number)차 시도"))
                         .font(.subheadline.weight(.bold))
                     Text(FeedbackPeople.name(of: attempt.sessionId, tracks: tracks))
                         .font(.subheadline)
                     if let patch { Text(versionLabel(patch)).font(.caption).foregroundStyle(.secondary) }
                     if isPassed { FeedbackStatusBadge(status: .passed) }
                     if !isExpanded && !attempt.comments.isEmpty {
-                        Text("코멘트 \(attempt.comments.count)").font(.caption).foregroundStyle(.secondary)
+                        Text(L("코멘트 \(attempt.comments.count)")).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 Text(attempt.createdAt, format: .dateTime.month().day().hour().minute())
@@ -283,13 +283,13 @@ struct FeedbackThreadSheet: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             if patch == nil {
-                Text("삭제된 녹음").font(.caption).foregroundStyle(.secondary)
+                Text(L("삭제된 녹음")).font(.caption).foregroundStyle(.secondary)
             }
             if isLatest && item.status != .passed && canJudge {
                 Button {
                     onSetPassed(attempt.id)
                 } label: {
-                    Label("통과", systemImage: "checkmark")
+                    Label(L("통과"), systemImage: "checkmark")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
@@ -306,11 +306,11 @@ struct FeedbackThreadSheet: View {
                     Text(comment.createdAt, format: .dateTime.month().day().hour().minute())
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Text(comment.text)
+                Text(comment.displayText)
             }
         }
         .contextMenu {
-            Button("코멘트 삭제", role: .destructive) { onDeleteComment(comment.id) }
+            Button(L("코멘트 삭제"), role: .destructive) { onDeleteComment(comment.id) }
         }
     }
 
@@ -326,14 +326,14 @@ struct FeedbackThreadSheet: View {
                     if sessions.count > 1 {
                         Text(FeedbackPeople.name(of: sessionId, tracks: tracks)).font(.subheadline.weight(.semibold))
                     }
-                    Picker("비교", selection: Binding<UUID?>(
+                    Picker(L("비교"), selection: Binding<UUID?>(
                         get: { comparisonSelection(sessionId) },
                         set: { id in onCompare(sessionId, id.flatMap(patchForId)) }
                     )) {
-                        Text("원본").tag(UUID?.none)
+                        Text(L("원본")).tag(UUID?.none)
                         ForEach(attempts) { attempt in
                             let n = item.attemptNumber(of: attempt.id) ?? 0
-                            Text(item.passedAttemptId == attempt.id ? "\(n)차 ✓" : "\(n)차").tag(UUID?.some(attempt.patchId))
+                            Text(item.passedAttemptId == attempt.id ? L("\(n)차 ✓") : L("\(n)차")).tag(UUID?.some(attempt.patchId))
                         }
                     }
                     .pickerStyle(.segmented)
@@ -341,9 +341,9 @@ struct FeedbackThreadSheet: View {
                 .padding(.vertical, 4)
             }
         } header: {
-            Text("비교해서 듣기")
+            Text(L("비교해서 듣기"))
         } footer: {
-            Text("고르면 그 버전으로 바꿔 끼워 피드백 구간을 반복 재생합니다. 닫으면 곡에 반영된 버전으로 돌아갑니다.")
+            Text(L("고르면 그 버전으로 바꿔 끼워 피드백 구간을 반복 재생합니다. 닫으면 곡에 반영된 버전으로 돌아갑니다."))
         }
     }
 
@@ -355,7 +355,7 @@ struct FeedbackThreadSheet: View {
                 Button {
                     onRecordAttempt(track.id)
                 } label: {
-                    Label("\(track.instrumentEmoji) \(track.displayName) \(item.attempts.count + 1)차 시도 녹음하기", systemImage: "record.circle")
+                    Label(L("\(track.instrumentEmoji) \(track.displayName) \(item.attempts.count + 1)차 시도 녹음하기"), systemImage: "record.circle")
                 }
             }
             if !attachablePatches.isEmpty {
@@ -366,13 +366,13 @@ struct FeedbackThreadSheet: View {
                         }
                     }
                 } label: {
-                    Label("이미 녹음한 패치로 올리기", systemImage: "paperclip")
+                    Label(L("이미 녹음한 패치로 올리기"), systemImage: "paperclip")
                 }
             }
         } header: {
-            Text(item.attempts.isEmpty ? "연습해서 올리기" : "다시 연습해서 올리기")
+            Text(item.attempts.isEmpty ? L("연습해서 올리기") : L("다시 연습해서 올리기"))
         } footer: {
-            Text("이 피드백 구간을 준비 시간 2초 뒤부터 녹음합니다. 올리면 새 시도로 추가되고 코멘트 요청 상태가 됩니다.")
+            Text(L("이 피드백 구간을 준비 시간 2초 뒤부터 녹음합니다. 올리면 새 시도로 추가되고 코멘트 요청 상태가 됩니다."))
         }
     }
 
@@ -380,17 +380,17 @@ struct FeedbackThreadSheet: View {
 
     private var commentSection: some View {
         Section {
-            Picker("쓰는 사람", selection: $commentAuthor) {
-                Text("리더").tag(FeedbackPeople.leader)
+            Picker(L("쓰는 사람"), selection: $commentAuthor) {
+                Text(L("리더")).tag(FeedbackPeople.leader)
                 ForEach(tracks) { track in
                     Text("\(track.instrumentEmoji) \(track.displayName)").tag(track.id)
                 }
             }
             HStack(alignment: .bottom) {
-                TextField(latestAttempt == nil ? "예: 3박째 베이스 음이 반음 낮아요" : "예: 이번엔 박자 딱 맞아요!",
+                TextField(latestAttempt == nil ? L("예: 3박째 베이스 음이 반음 낮아요") : L("예: 이번엔 박자 딱 맞아요!"),
                           text: $commentText, axis: .vertical)
                     .lineLimit(1...5)
-                Button("보내기") {
+                Button(L("보내기")) {
                     onComment(commentText.trimmingCharacters(in: .whitespacesAndNewlines), commentAuthor, latestAttempt?.id)
                     commentText = ""
                 }
@@ -398,9 +398,9 @@ struct FeedbackThreadSheet: View {
             }
         } header: {
             if let latest = latestAttempt, let n = item.attemptNumber(of: latest.id) {
-                Text("\(n)차 시도에 코멘트")
+                Text(L("\(n)차 시도에 코멘트"))
             } else {
-                Text("피드백에 코멘트")
+                Text(L("피드백에 코멘트"))
             }
         }
     }
@@ -419,7 +419,7 @@ struct FeedbackStatusBadge: View {
     /// 약속 피드백은 연습이 아니라 확인을 기다리므로 "확인 필요"로 보여준다.
     init(item: FeedbackItem) {
         self.init(status: item.status,
-                  label: item.kind == .cue && item.status != .passed ? "확인 필요" : nil)
+                  label: item.kind == .cue && item.status != .passed ? L("확인 필요") : nil)
     }
 
     var body: some View {
@@ -476,20 +476,20 @@ struct FeedbackPickerSheet: View {
                                 .foregroundStyle(.secondary)
                             Spacer()
                             if !item.attempts.isEmpty {
-                                Text("시도 \(item.attempts.count)회").font(.caption).foregroundStyle(.secondary)
+                                Text(L("시도 \(item.attempts.count)회")).font(.caption).foregroundStyle(.secondary)
                             }
                             FeedbackStatusBadge(item: item)
                         }
-                        Text(item.text.isEmpty ? "(내용 없음)" : item.text)
+                        Text(item.text.isEmpty ? L("(내용 없음)") : item.displayText)
                             .lineLimit(2)
                             .foregroundStyle(.primary)
                     }
                 }
             }
-            .navigationTitle("이 구간의 피드백 \(items.count)개")
+            .navigationTitle(L("이 구간의 피드백 \(items.count)개"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("닫기", action: onClose) }
+                ToolbarItem(placement: .confirmationAction) { Button(L("닫기"), action: onClose) }
             }
         }
     }
@@ -500,13 +500,13 @@ enum FeedbackPeople {
     static let leader = "leader"
 
     static func name(of id: String, tracks: [StemTrack]) -> String {
-        if id == leader { return "리더" }
+        if id == leader { return L("리더") }
         return tracks.first { $0.id == id }?.displayName ?? id
     }
 
     /// "전체" 또는 "베이스, 드럼".
     static func recipients(of item: FeedbackItem, tracks: [StemTrack]) -> String {
-        if item.isForAllSessions { return "전체" }
+        if item.isForAllSessions { return L("전체") }
         return item.targetSessionIds.map { name(of: $0, tracks: tracks) }.joined(separator: ", ")
     }
 }

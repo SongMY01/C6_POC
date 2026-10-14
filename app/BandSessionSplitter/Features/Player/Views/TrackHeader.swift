@@ -39,7 +39,7 @@ struct TrackHeader: View {
 
                 if !track.activePatches.isEmpty {
                     HStack(spacing: 10) {
-                        Text("패치")
+                        Text(L("패치"))
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(Color.red.opacity(0.9))
                             .frame(width: 60, alignment: .leading)

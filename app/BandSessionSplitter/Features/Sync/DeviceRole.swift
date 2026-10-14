@@ -16,7 +16,7 @@ enum DeviceRole {
 
     /// 선택지: 리더 + 분리되는 세션들
     static var options: [(id: String, label: String)] {
-        [(leader, "👑 리더")] + sessionStems.map { ($0.key, "\(emoji(for: $0.key)) \($0.displayName)") }
+        [(leader, L("👑 리더"))] + sessionStems.map { ($0.key, "\(emoji(for: $0.key)) \($0.displayName)") }
     }
 
     static func label(for id: String) -> String {

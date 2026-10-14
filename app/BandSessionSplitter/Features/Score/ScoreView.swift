@@ -84,14 +84,14 @@ struct ScoreView: View {
     private var controls: some View {
         VStack(spacing: 8) {
             HStack {
-                Text("\(displayedPageIndex + 1) / \(scoreSync.pageCount) 페이지")
+                Text(L("\(displayedPageIndex + 1) / \(scoreSync.pageCount) 페이지"))
                     .font(.subheadline.weight(.semibold))
                 if scoreSync.isCalibrated[displayedPageIndex] {
-                    Label("보정됨", systemImage: "checkmark.seal.fill")
+                    Label(L("보정됨"), systemImage: "checkmark.seal.fill")
                         .font(.caption)
                         .foregroundStyle(.green)
                 } else {
-                    Label("템포 추정", systemImage: "waveform.path.ecg")
+                    Label(L("템포 추정"), systemImage: "waveform.path.ecg")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -125,23 +125,23 @@ struct ScoreView: View {
                         scoreSync.markNextPageStart(currentTime: currentTime, currentPageIndex: calibrationCursor)
                         calibrationCursor = min(calibrationCursor + 1, scoreSync.pageCount - 1)
                     } label: {
-                        Label("지금 다음 페이지로 넘김 기록", systemImage: "hand.tap.fill")
+                        Label(L("지금 다음 페이지로 넘김 기록"), systemImage: "hand.tap.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(calibrationCursor >= scoreSync.pageCount - 1)
 
-                    Button("템포 기준으로 초기화", role: .destructive) {
+                    Button(L("템포 기준으로 초기화"), role: .destructive) {
                         scoreSync.resetToBaseline()
                         calibrationCursor = 0
                     }
                     .buttonStyle(.bordered)
                 }
-                Text("지금 보이는 페이지(\(calibrationCursor + 1)페이지)에서 다음 페이지로 넘어가야 할 실제 순간에 위 버튼을 누르세요. 화면은 자동계산을 따라가지 않고 이 보정 진행 상황만 보여줍니다.")
+                Text(L("지금 보이는 페이지(\(calibrationCursor + 1)페이지)에서 다음 페이지로 넘어가야 할 실제 순간에 위 버튼을 누르세요. 화면은 자동계산을 따라가지 않고 이 보정 진행 상황만 보여줍니다."))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
-            Toggle("싱크 보정 모드", isOn: Binding(
+            Toggle(L("싱크 보정 모드"), isOn: Binding(
                 get: { scoreSync.calibrationModeOn },
                 set: { newValue in
                     scoreSync.calibrationModeOn = newValue
@@ -161,7 +161,7 @@ private struct ContentUnavailableFallback: View {
             Image(systemName: "doc.text.magnifyingglass")
                 .font(.system(size: 40))
                 .foregroundStyle(.secondary)
-            Text("악보 PDF를 불러올 수 없습니다")
+            Text(L("악보 PDF를 불러올 수 없습니다"))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

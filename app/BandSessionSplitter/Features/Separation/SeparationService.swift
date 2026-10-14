@@ -25,13 +25,13 @@ struct StemDefinition {
     let colorName: String  // asset/색상 매핑용
 }
 
-let sessionStems: [StemDefinition] = [
-    .init(key: "vocals", displayName: "보컬", colorName: "vocals"),
-    .init(key: "drums",  displayName: "드럼", colorName: "drums"),
-    .init(key: "bass",   displayName: "베이스", colorName: "bass"),
-    .init(key: "guitar", displayName: "일렉기타", colorName: "guitar"),
-    .init(key: "piano",  displayName: "피아노", colorName: "piano"),
-]
+var sessionStems: [StemDefinition] { [
+    .init(key: "vocals", displayName: L("보컬"), colorName: "vocals"),
+    .init(key: "drums",  displayName: L("드럼"), colorName: "drums"),
+    .init(key: "bass",   displayName: L("베이스"), colorName: "bass"),
+    .init(key: "guitar", displayName: L("일렉기타"), colorName: "guitar"),
+    .init(key: "piano",  displayName: L("피아노"), colorName: "piano"),
+] }
 
 enum SeparationError: LocalizedError {
     case badResponse
@@ -40,9 +40,9 @@ enum SeparationError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .badResponse: return "서버 응답을 해석할 수 없습니다."
-        case .serverError(let msg): return "분리 실패: \(msg)"
-        case .cannotReadFile: return "선택한 파일을 읽을 수 없습니다."
+        case .badResponse: return L("서버 응답을 해석할 수 없습니다.")
+        case .serverError(let msg): return L("분리 실패: \(msg)")
+        case .cannotReadFile: return L("선택한 파일을 읽을 수 없습니다.")
         }
     }
 }

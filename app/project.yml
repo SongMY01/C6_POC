@@ -27,7 +27,9 @@ targets:
               NSExceptionAllowsInsecureHTTPLoads: true
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
-        NSMicrophoneUsageDescription: "구간을 재녹음해서 원본과 비교해 들으려면 마이크 접근이 필요합니다."
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, ko]
+        NSMicrophoneUsageDescription: "Microphone access is needed to re-record a section and compare it with the original."
     settings:
       base:
         TARGETED_DEVICE_FAMILY: "2"

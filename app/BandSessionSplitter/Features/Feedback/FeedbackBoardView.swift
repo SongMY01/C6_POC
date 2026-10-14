@@ -10,7 +10,6 @@ struct FeedbackBoardView: View {
     let onOpen: (FeedbackItem) -> Void
     let onCompose: (() -> Void)?
     /// 종류별 입력창 목업 열기
-    var onComposeTyped: (() -> Void)? = nil
 
     /// nil = 전체 세션. 세션 연주자의 iPad에서는 처음에 "내 세션"으로 걸러서 보여준다.
     @State private var sessionFilter: String? = DeviceRole.isLeader ? nil : DeviceRole.current
@@ -60,7 +59,7 @@ struct FeedbackBoardView: View {
         VStack(alignment: .leading, spacing: 10) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    chip("👥 전체 세션", isOn: sessionFilter == nil) { sessionFilter = nil }
+                    chip(L("👥 전체 세션"), isOn: sessionFilter == nil) { sessionFilter = nil }
                     ForEach(tracks) { track in
                         chip("\(track.instrumentEmoji) \(track.displayName)", isOn: sessionFilter == track.id) {
                             sessionFilter = track.id
@@ -69,22 +68,16 @@ struct FeedbackBoardView: View {
                 }
             }
             HStack(spacing: 8) {
-                chip("전체 \(count(nil))", isOn: statusFilter == nil) { statusFilter = nil }
+                chip(L("전체 \(count(nil))"), isOn: statusFilter == nil) { statusFilter = nil }
                 ForEach([FeedbackStatus.awaitingComment, .needsPractice, .passed], id: \.label) { status in
                     chip("\(status.label) \(count(status))", isOn: statusFilter == status, tint: status.color) {
                         statusFilter = status
                     }
                 }
                 Spacer()
-                if let onComposeTyped {
-                    Button(action: onComposeTyped) {
-                        Label("종류별로 쓰기", systemImage: "wand.and.stars")
-                    }
-                    .buttonStyle(GBToolButtonStyle())
-                }
                 if let onCompose {
                     Button(action: onCompose) {
-                        Label("새 피드백", systemImage: "square.and.pencil")
+                        Label(L("새 피드백"), systemImage: "square.and.pencil")
                     }
                     .buttonStyle(GBToolButtonStyle())
                 }
@@ -135,7 +128,7 @@ struct FeedbackBoardView: View {
                         .foregroundStyle(.white.opacity(0.75))
                     FeedbackStatusBadge(item: item)
                     if !item.attempts.isEmpty {
-                        Text("시도 \(item.attempts.count)회")
+                        Text(L("시도 \(item.attempts.count)회"))
                             .font(.caption)
                             .foregroundStyle(.white.opacity(0.55))
                     }
@@ -144,7 +137,7 @@ struct FeedbackBoardView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.45))
                 }
-                Text(item.text.isEmpty ? "(내용 없음)" : item.text)
+                Text(item.text.isEmpty ? L("(내용 없음)") : item.displayText)
                     .font(.body)
                     .foregroundStyle(.white.opacity(item.text.isEmpty ? 0.5 : 0.95))
                     .multilineTextAlignment(.leading)
@@ -152,7 +145,7 @@ struct FeedbackBoardView: View {
                 if let latestComment {
                     HStack(spacing: 6) {
                         Image(systemName: "text.bubble")
-                        Text("\(FeedbackPeople.name(of: latestComment.author, tracks: tracks)): \(latestComment.text)")
+                        Text("\(FeedbackPeople.name(of: latestComment.author, tracks: tracks)): \(latestComment.displayText)")
                             .lineLimit(1)
                     }
                     .font(.caption)
@@ -173,7 +166,7 @@ struct FeedbackBoardView: View {
     }
 
     private func recipientsLabel(_ item: FeedbackItem) -> String {
-        if item.isForAllSessions { return "👥 전체" }
+        if item.isForAllSessions { return L("👥 전체") }
         return item.targetSessionIds.map { id in
             let track = tracks.first { $0.id == id }
             return "\(track?.instrumentEmoji ?? "") \(track?.displayName ?? id)"
@@ -185,11 +178,11 @@ struct FeedbackBoardView: View {
             Image(systemName: "text.bubble")
                 .font(.system(size: 44))
                 .foregroundStyle(.white.opacity(0.35))
-            Text(items.isEmpty ? "아직 피드백이 없습니다" : "조건에 맞는 피드백이 없습니다")
+            Text(items.isEmpty ? L("아직 피드백이 없습니다") : L("조건에 맞는 피드백이 없습니다"))
                 .font(.headline)
                 .foregroundStyle(.white.opacity(0.7))
             if items.isEmpty {
-                Text("타임라인에서 구간을 잡고 새 피드백을 남겨 보세요.")
+                Text(L("타임라인에서 구간을 잡고 새 피드백을 남겨 보세요."))
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.5))
             }

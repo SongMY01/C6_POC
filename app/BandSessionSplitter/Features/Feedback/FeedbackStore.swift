@@ -6,13 +6,19 @@ struct FeedbackComment: Identifiable, Codable, Equatable {
     var author: String
     var text: String
     var createdAt: Date
+    /// 다른 언어 번역 ("en"/"ko" → 문장). 샘플 데이터처럼 두 언어를 다 갖고 있을 때만 있다.
+    var translations: [String: String]?
 
-    init(id: UUID = UUID(), author: String, text: String, createdAt: Date = Date()) {
+    init(id: UUID = UUID(), author: String, text: String, createdAt: Date = Date(), translations: [String: String]? = nil) {
         self.id = id
         self.author = author
         self.text = text
         self.createdAt = createdAt
+        self.translations = translations
     }
+
+    /// 지금 표시 언어에 맞는 문장 (번역이 없으면 쓴 그대로).
+    var displayText: String { translations?[AppLanguage.current.rawValue] ?? text }
 }
 
 /// 시도 하나 = 피드백 받은 세션이 그 구간을 다시 녹음해 올린 것 + 그 녹음에 달린 코멘트.
@@ -46,9 +52,9 @@ enum FeedbackStatus: Equatable {
 
     var label: String {
         switch self {
-        case .needsPractice: return "연습 필요"
-        case .awaitingComment: return "코멘트 요청"
-        case .passed: return "통과"
+        case .needsPractice: return L("연습 필요")
+        case .awaitingComment: return L("코멘트 요청")
+        case .passed: return L("통과")
         }
     }
 
@@ -72,6 +78,8 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
     var endTime: TimeInterval
     var createdAt: Date
     var text: String
+    /// 다른 언어 번역 ("en"/"ko" → 문장). 두 언어를 다 갖고 있을 때만 있다.
+    var translations: [String: String]?
     /// 받는 세션 id(StemTrack.id: "bass" 등). 비어 있으면 전체 세션에게 보낸 피드백.
     var targetSessionIds: [String]
     /// 시도들 (오래된 순). 다시 연습해서 올릴 때마다 하나씩 늘어난다.
@@ -88,6 +96,9 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
     var referencePatchId: UUID?
     /// 약속 피드백: 확인을 누른 사람들 (세션 id 또는 "leader")
     var confirmedBy: [String] = []
+
+    /// 지금 표시 언어에 맞는 문장 (번역이 없으면 쓴 그대로).
+    var displayText: String { translations?[AppLanguage.current.rawValue] ?? text }
 
     var plan: PracticePlan { (kind ?? .free).plan }
 
@@ -134,7 +145,7 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, startTime, endTime, createdAt, text, targetSessionIds, attempts, comments, passedAttemptId
+        case id, startTime, endTime, createdAt, text, translations, targetSessionIds, attempts, comments, passedAttemptId
         case kind, targetMix, referencePatchId, confirmedBy
         case replies // 예전 형식 (읽기 전용)
     }
@@ -149,6 +160,7 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
         endTime = try c.decode(TimeInterval.self, forKey: .endTime)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        translations = try c.decodeIfPresent([String: String].self, forKey: .translations)
         targetSessionIds = try c.decodeIfPresent([String].self, forKey: .targetSessionIds) ?? []
         attempts = try c.decodeIfPresent([FeedbackAttempt].self, forKey: .attempts) ?? []
         comments = try c.decodeIfPresent([FeedbackComment].self, forKey: .comments) ?? []
@@ -179,6 +191,7 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
         try c.encode(endTime, forKey: .endTime)
         try c.encode(createdAt, forKey: .createdAt)
         try c.encode(text, forKey: .text)
+        try c.encodeIfPresent(translations, forKey: .translations)
         try c.encode(targetSessionIds, forKey: .targetSessionIds)
         try c.encode(attempts, forKey: .attempts)
         try c.encode(comments, forKey: .comments)
@@ -246,9 +259,10 @@ final class FeedbackStore: ObservableObject {
     @discardableResult
     func addFeedback(timeRange: ClosedRange<TimeInterval>, text: String, targetSessionIds: [String],
                      kind: FeedbackKind? = nil, targetMix: [String: Float]? = nil,
-                     referencePatchId: UUID? = nil) -> FeedbackItem {
-        let item = FeedbackItem(timeRange: timeRange, text: text, targetSessionIds: targetSessionIds,
+                     referencePatchId: UUID? = nil, translations: [String: String]? = nil) -> FeedbackItem {
+        var item = FeedbackItem(timeRange: timeRange, text: text, targetSessionIds: targetSessionIds,
                                 kind: kind, targetMix: targetMix, referencePatchId: referencePatchId)
+        item.translations = translations
         items.append(item)
         items.sort { $0.startTime < $1.startTime }
         persist()

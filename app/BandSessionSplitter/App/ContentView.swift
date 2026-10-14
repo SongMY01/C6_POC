@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var showingServerSettings = false
     @ObservedObject private var sync = SyncClient.shared
     @AppStorage("deviceRole") private var role = DeviceRole.leader
+    @AppStorage(AppLanguage.storageKey) private var appLanguage = AppLanguage.english.rawValue
 
     var body: some View {
         NavigationStack {
@@ -26,11 +27,11 @@ struct ContentView: View {
                         case .fileSelected(let name):
                             fileSelectedView(name: name)
                         case .uploading:
-                            statusView(title: "녹음 파일 업로드 중…", subtitle: nil)
+                            statusView(title: L("녹음 파일 업로드 중…"), subtitle: nil)
                         case .separating:
-                            statusView(title: "세션별로 분리하는 중…", subtitle: "보컬 · 드럼 · 베이스 · 기타 · 피아노")
+                            statusView(title: L("세션별로 분리하는 중…"), subtitle: L("보컬 · 드럼 · 베이스 · 기타 · 피아노"))
                         case .downloadingStems(let done, let total):
-                            statusView(title: "분리된 트랙 내려받는 중…", subtitle: "\(done)/\(total)")
+                            statusView(title: L("분리된 트랙 내려받는 중…"), subtitle: "\(done)/\(total)")
                         case .ready:
                             EmptyView()
                         case .failed(let message):
@@ -40,8 +41,11 @@ struct ContentView: View {
                         Spacer()
                     }
                     .padding(32)
-                    .navigationTitle("합주 세션 분리 PoC")
+                    .navigationTitle(L("합주 세션 분리 PoC"))
                     .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            languageMenu
+                        }
                         ToolbarItem(placement: .topBarTrailing) {
                             Button {
                                 showingServerSettings = true
@@ -52,6 +56,8 @@ struct ContentView: View {
                     }
                 }
             }
+            // 날짜 표기도 표시 언어를 따른다 (기기 언어와 다를 수 있음)
+            .environment(\.locale, Locale(identifier: appLanguage == AppLanguage.korean.rawValue ? "ko_KR" : "en_US"))
             .task {
                 // 앱을 켜면 바로 서버를 찾아 동기화를 시작한다 (공유 곡 여부를 알기 위해)
                 if !viewModel.isManualServer { await viewModel.detectServer() }
@@ -71,11 +77,30 @@ struct ContentView: View {
         }
     }
 
+    /// 표시 언어 선택. 고르면 홈 화면이 바로 바뀌고, 곡을 열면 그 언어로 열린다.
+    private var languageMenu: some View {
+        Menu {
+            ForEach(AppLanguage.allCases) { language in
+                Button {
+                    appLanguage = language.rawValue
+                } label: {
+                    if language.rawValue == appLanguage {
+                        Label(language.label, systemImage: "checkmark")
+                    } else {
+                        Text(language.label)
+                    }
+                }
+            }
+        } label: {
+            Label(AppLanguage(rawValue: appLanguage)?.label ?? "English", systemImage: "globe")
+        }
+    }
+
     private var header: some View {
         VStack(spacing: 4) {
-            Text("통합 녹음본 → 세션별 음원 분리")
+            Text(L("통합 녹음본 → 세션별 음원 분리"))
                 .font(.title2).bold()
-            Text("Demucs(htdemucs_6s) 로컬 서버 연동 검증용 프로토타입")
+            Text(L("Demucs(htdemucs_6s) 로컬 서버 연동 검증용 프로토타입"))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -85,8 +110,8 @@ struct ContentView: View {
     private var roleAndSharedSong: some View {
         VStack(spacing: 16) {
             VStack(spacing: 8) {
-                Text("이 iPad는").font(.subheadline).foregroundStyle(.secondary)
-                Picker("역할", selection: $role) {
+                Text(L("이 iPad는")).font(.subheadline).foregroundStyle(.secondary)
+                Picker(L("역할"), selection: $role) {
                     ForEach(DeviceRole.options, id: \.id) { option in
                         Text(option.label).tag(option.id)
                     }
@@ -98,14 +123,14 @@ struct ContentView: View {
                 Button {
                     viewModel.loadSharedSong()
                 } label: {
-                    Label("합주 곡 열기 (공유됨)", systemImage: "music.note.house")
+                    Label(L("합주 곡 열기 (공유됨)"), systemImage: "music.note.house")
                         .font(.title3.weight(.semibold))
                         .padding(.horizontal, 12).padding(.vertical, 6)
                 }
                 .buttonStyle(.borderedProminent)
                 Text(sync.songJobId == nil
-                     ? "서버에 연결되지 않았어요 — 이 기기에 저장된 곡을 엽니다."
-                     : "리더가 분리해 둔 곡을 바로 엽니다. 새 녹음을 분리하려면 아래에서 파일을 고르세요.")
+                     ? L("서버에 연결되지 않았어요 — 이 기기에 저장된 곡을 엽니다.")
+                     : L("리더가 분리해 둔 곡을 바로 엽니다. 새 녹음을 분리하려면 아래에서 파일을 고르세요."))
                     .font(.caption).foregroundStyle(.secondary)
             }
             SyncStatusLabel()
@@ -118,9 +143,9 @@ struct ContentView: View {
             Image(systemName: "waveform.badge.mic")
                 .font(.system(size: 64))
                 .foregroundStyle(.secondary)
-            Text("합주 녹음 파일을 선택하세요")
+            Text(L("합주 녹음 파일을 선택하세요"))
                 .font(.headline)
-            Button("녹음 파일 선택") { showingFilePicker = true }
+            Button(L("녹음 파일 선택")) { showingFilePicker = true }
                 .buttonStyle(.borderedProminent)
         }
     }
@@ -130,9 +155,9 @@ struct ContentView: View {
             Label(name, systemImage: "doc.badge.waveform")
                 .font(.headline)
             HStack {
-                Button("다른 파일 선택") { showingFilePicker = true }
+                Button(L("다른 파일 선택")) { showingFilePicker = true }
                     .buttonStyle(.bordered)
-                Button("분리 시작") { viewModel.startSeparation() }
+                Button(L("분리 시작")) { viewModel.startSeparation() }
                     .buttonStyle(.borderedProminent)
             }
         }
@@ -157,7 +182,7 @@ struct ContentView: View {
             Text(message)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
-            Button("다시 시도") { viewModel.reset() }
+            Button(L("다시 시도")) { viewModel.reset() }
                 .buttonStyle(.borderedProminent)
         }
     }
@@ -169,13 +194,13 @@ struct ContentView: View {
                     if let status = viewModel.serverStatus {
                         Text(status).font(.subheadline)
                     }
-                    Button("자동으로 찾기") { Task { await viewModel.detectServer() } }
+                    Button(L("자동으로 찾기")) { Task { await viewModel.detectServer() } }
                 } header: {
-                    Text("분리 서버")
+                    Text(L("분리 서버"))
                 } footer: {
-                    Text("분리를 시작할 때마다 아래 후보 중 응답하는 서버를 자동으로 고릅니다.")
+                    Text(L("분리를 시작할 때마다 아래 후보 중 응답하는 서버를 자동으로 고릅니다."))
                 }
-                Section("후보") {
+                Section(L("후보")) {
                     ForEach(serverCandidates) { candidate in
                         Button {
                             viewModel.setManualServer(candidate.url)
@@ -191,7 +216,7 @@ struct ContentView: View {
                         }
                     }
                 }
-                Section("직접 입력") {
+                Section(L("직접 입력")) {
                     TextField("http://127.0.0.1:8756", text: Binding(
                         get: { viewModel.serverURLText },
                         set: { viewModel.setManualServer($0) }
@@ -200,10 +225,10 @@ struct ContentView: View {
                     .autocorrectionDisabled()
                 }
             }
-            .navigationTitle("서버 설정")
+            .navigationTitle(L("서버 설정"))
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("완료") { showingServerSettings = false }
+                    Button(L("완료")) { showingServerSettings = false }
                 }
             }
         }

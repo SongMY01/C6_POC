@@ -12,10 +12,9 @@ struct StemPlayerView: View {
     @StateObject private var patchStore = PatchStore()
     /// 피드백 종류가 정한 방법(카운트인 · 템포 사다리)으로 구간 연습
     @StateObject private var practice = PracticeSession()
-    /// 작성 중인 피드백 (시범 녹음하러 시트를 닫아도 남아 있게 여기 둔다)
-    @State private var composeDraft: FeedbackDraft?
-    /// 지금 녹음이 피드백 작성 중의 "시범 녹음"인지
-    @State private var recordingReference = false
+    /// 새 피드백을 쓸 구간과 미리 고른 받는 사람 (작성 시트를 열 때 정한다)
+    @State private var composeRange: ClosedRange<TimeInterval>?
+    @State private var composeTargets: Set<String> = []
     /// 목표 믹스(밸런스 피드백)를 듣는 동안 원래 볼륨 — 끝나면 되돌린다.
     @State private var savedVolumes: [String: Float]?
     @State private var showingScore = false
@@ -39,8 +38,6 @@ struct StemPlayerView: View {
 
     private enum FeedbackSheet: Identifiable {
         case compose
-        /// 종류별 입력창 목업 (인터페이스 확인용 — 저장·전송 안 함)
-        case typedMock
         case thread(UUID)
         /// 겹치거나 붙어 있는 피드백 묶음에서 고르기
         case picker([UUID])
@@ -48,7 +45,6 @@ struct StemPlayerView: View {
         var id: String {
             switch self {
             case .compose: return "compose"
-            case .typedMock: return "typedMock"
             case .thread(let id): return "thread-\(id)"
             case .picker(let ids): return "picker-\(ids.map(\.uuidString).joined())"
             }
@@ -124,8 +120,7 @@ struct StemPlayerView: View {
                         tracks: controller.tracks,
                         currentTime: controller.currentTime,
                         onOpen: { openFeedback($0) },
-                        onCompose: controller.loopRegion == nil ? nil : { startCompose() },
-                        onComposeTyped: { activeSheet = .typedMock }
+                        onCompose: { startCompose() }
                     )
                 } else {
                     trackArea
@@ -237,8 +232,8 @@ struct StemPlayerView: View {
             .buttonStyle(GBToolButtonStyle(isOn: controller.isLoopEnabled, onColor: GB.cycle))
 
             HStack(spacing: 6) {
-                Button("시작") { controller.markLoopStart() }
-                Button("끝") { controller.markLoopEnd() }
+                Button(L("시작")) { controller.markLoopStart() }
+                Button(L("끝")) { controller.markLoopEnd() }
                 if controller.loopRegion != nil {
                     Button { controller.clearLoop() } label: { Image(systemName: "xmark") }
                 }
@@ -256,15 +251,9 @@ struct StemPlayerView: View {
 
             Spacer(minLength: 8)
 
+            // 구간이 안 잡혀 있으면 지금 위치부터 8초로 쓴다
             Button { startCompose() } label: {
                 Image(systemName: "square.and.pencil")
-            }
-            .buttonStyle(GBToolButtonStyle())
-            .disabled(controller.loopRegion == nil)
-
-            // 종류별로 쓰기 (목업) — 위 기존 버튼과 따로 동작한다. 구간이 안 잡혀 있어도 열린다.
-            Button { activeSheet = .typedMock } label: {
-                Image(systemName: "wand.and.stars")
             }
             .buttonStyle(GBToolButtonStyle())
 
@@ -324,7 +313,7 @@ struct StemPlayerView: View {
                                         isLoopEnabled: controller.isLoopEnabled,
                                         isSelected: selectedTrackId == track.id,
                                         patches: patchStore.patches(sessionId: track.id),
-                                        versionLabel: { "\($0.isAdopted ? "✓ " : "")패치 v\(patchStore.versionNumber(of: $0))" },
+                                        versionLabel: { L("\($0.isAdopted ? "✓ " : "")패치 v\(patchStore.versionNumber(of: $0))") },
                                         onTapPatch: { tapPatch($0, for: track) },
                                         selectedPatchId: selectedPatch?.trackId == track.id ? selectedPatch?.patchId : nil,
                                         onMovePatch: { t in editSelectedPatch(in: track) { id in controller.movePatch(id, of: track, to: t) } },
@@ -440,24 +429,24 @@ struct StemPlayerView: View {
         VStack(spacing: 8) {
             if let selectedRegion, let track = selectedRegionTrack {
                 HStack(spacing: 10) {
-                    Text("\(track.displayName) 리전")
+                    Text(L("\(track.displayName) 리전"))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.8))
                     Button {
                         if let (left, _) = controller.splitRegion(in: track, at: controller.currentTime) {
                             self.selectedRegion = RegionSelection(trackId: track.id, regionId: left)
                         }
-                    } label: { Label("재생헤드에서 분할", systemImage: "scissors") }
+                    } label: { Label(L("재생헤드에서 분할"), systemImage: "scissors") }
                     .disabled(!canSplitSelectedRegion)
                     Button(role: .destructive) {
                         controller.deleteRegion(selectedRegion.regionId, in: track)
                         self.selectedRegion = nil
-                    } label: { Label("삭제", systemImage: "trash") }
+                    } label: { Label(L("삭제"), systemImage: "trash") }
                     Button {
                         controller.resetRegions(of: track)
                         self.selectedRegion = nil
-                    } label: { Label("원래대로", systemImage: "arrow.uturn.backward") }
-                    Button("완료") { self.selectedRegion = nil }
+                    } label: { Label(L("원래대로"), systemImage: "arrow.uturn.backward") }
+                    Button(L("완료")) { self.selectedRegion = nil }
                 }
                 .buttonStyle(GBToolButtonStyle())
                 .padding(10)
@@ -469,24 +458,24 @@ struct StemPlayerView: View {
                let patch = track.activePatch(id: selectedPatch.patchId) {
                 let isAdopted = patchStore.patch(id: patch.id)?.isAdopted == true
                 HStack(spacing: 10) {
-                    Text("\(track.displayName) 패치 v\(patchStore.versionNumber(of: patch)) · \(formatTime(patch.startTime))~\(formatTime(patch.endTime))")
+                    Text(L("\(track.displayName) 패치 v\(patchStore.versionNumber(of: patch)) · \(formatTime(patch.startTime))~\(formatTime(patch.endTime))"))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.8))
                     Button {
                         patchStore.setAdopted(!isAdopted, patchId: patch.id)
                     } label: {
-                        Label(isAdopted ? "반영 해제" : "곡에 반영", systemImage: isAdopted ? "checkmark.seal.fill" : "checkmark.seal")
+                        Label(isAdopted ? L("반영 해제") : L("곡에 반영"), systemImage: isAdopted ? "checkmark.seal.fill" : "checkmark.seal")
                     }
                     Button {
                         controller.deactivatePatch(patch.id, for: track)
                         self.selectedPatch = nil
-                    } label: { Label("끄기", systemImage: "speaker.slash") }
+                    } label: { Label(L("끄기"), systemImage: "speaker.slash") }
                     Button(role: .destructive) {
                         controller.deactivatePatch(patch.id, for: track)
                         patchStore.delete(patch)
                         self.selectedPatch = nil
-                    } label: { Label("삭제", systemImage: "trash") }
-                    Button("완료") { self.selectedPatch = nil }
+                    } label: { Label(L("삭제"), systemImage: "trash") }
+                    Button(L("완료")) { self.selectedPatch = nil }
                 }
                 .buttonStyle(GBToolButtonStyle())
                 .padding(10)
@@ -494,47 +483,21 @@ struct StemPlayerView: View {
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.red.opacity(0.7), lineWidth: 1))
             }
             if let pending = controller.pendingRecording,
-               let track = controller.tracks.first(where: { $0.id == pending.trackId }),
-               recordingReference {
-                HStack(spacing: 12) {
-                    Text("시범 녹음 — \(track.displayName) 자리 \(formatTime(pending.region.lowerBound))~\(formatTime(pending.region.upperBound))")
-                        .font(.subheadline.weight(.semibold))
-                    Button("들어보기") { controller.previewPendingRecording() }
-                        .buttonStyle(.bordered)
-                    Button("시범으로 쓰기") { saveReferenceRecording(for: track) }
-                        .buttonStyle(.borderedProminent)
-                    Button("다시 녹음") {
-                        controller.discardPendingRecording()
-                        recordTapped()
-                    }
-                    .buttonStyle(.bordered)
-                    Button("취소", role: .destructive) {
-                        controller.discardPendingRecording()
-                        recordingReference = false
-                        activeSheet = .compose
-                    }
-                    .buttonStyle(.bordered)
-                }
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 12).fill(GB.panel))
-            } else if let pending = controller.pendingRecording,
                let track = controller.tracks.first(where: { $0.id == pending.trackId }) {
                 HStack(spacing: 12) {
-                    Text("\(replyingToFeedbackId != nil ? "피드백 답변 녹음" : "방금 녹음") — \(track.displayName) \(formatTime(pending.region.lowerBound))~\(formatTime(pending.region.upperBound))")
+                    Text(L("\(replyingToFeedbackId != nil ? L("피드백 답변 녹음") : L("방금 녹음")) — \(track.displayName) \(formatTime(pending.region.lowerBound))~\(formatTime(pending.region.upperBound))"))
                         .font(.subheadline.weight(.semibold))
-                    Button("들어보기") { controller.previewPendingRecording() }
+                    Button(L("들어보기")) { controller.previewPendingRecording() }
                         .buttonStyle(.bordered)
-                    Button(replyingToFeedbackId != nil ? "올리고 코멘트 요청" : "저장") { savePendingRecording(for: track) }
+                    Button(replyingToFeedbackId != nil ? L("올리고 코멘트 요청") : L("저장")) { savePendingRecording(for: track) }
                         .buttonStyle(.borderedProminent)
-                    Button("다시 녹음", role: .destructive) { controller.discardPendingRecording() }
+                    Button(L("다시 녹음"), role: .destructive) { controller.discardPendingRecording() }
                         .buttonStyle(.bordered)
                 }
                 .padding(12)
                 .background(RoundedRectangle(cornerRadius: 12).fill(GB.panel))
             } else if controller.isRecording {
-                Text(recordingReference
-                     ? "● 시범 녹음 중 — 준비 시간(2초) 뒤부터 녹음됩니다. 쳐도 되고 불러도 돼요."
-                     : "● 녹음 중 — 준비 시간(2초) 뒤부터 녹음됩니다. 다시 ■를 누르면 멈춥니다.")
+                Text(L("● 녹음 중 — 준비 시간(2초) 뒤부터 녹음됩니다. 다시 ■를 누르면 멈춥니다."))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.red)
                     .padding(12)
@@ -583,8 +546,8 @@ struct StemPlayerView: View {
 
     // MARK: - 피드백 시트 (작성 / 스레드 / 묶음 목록)
 
-    /// 목업 시트에 보여 줄 구간: 잡혀 있는 구간 반복, 없으면 지금 위치부터 8초.
-    private var mockFeedbackRange: ClosedRange<TimeInterval> {
+    /// 새 피드백 구간: 잡혀 있는 구간 반복, 없으면 지금 위치부터 8초.
+    private var defaultComposeRange: ClosedRange<TimeInterval> {
         if let region = controller.loopRegion { return region }
         let start = min(controller.currentTime, max(0, controller.duration - 8))
         return start...(start + 8)
@@ -594,23 +557,13 @@ struct StemPlayerView: View {
     private func feedbackSheet(_ sheet: FeedbackSheet) -> some View {
         switch sheet {
         case .compose:
-            if let draft = composeDraft {
-                FeedbackComposerSheet(
-                    controller: controller,
-                    draft: Binding(get: { composeDraft ?? draft }, set: { composeDraft = $0 }),
-                    hasReference: draft.referencePatchId.flatMap { patchStore.patch(id: $0) } != nil,
-                    onSend: sendDraft,
-                    onCancel: cancelCompose,
-                    onRecordReference: { recordReference(sessionId: $0) },
-                    onPlayReference: playDraftReference,
-                    onDeleteReference: deleteDraftReference
-                )
-            }
-        case .typedMock:
-            TypedFeedbackMockSheet(
-                timeRange: mockFeedbackRange,
+            FeedbackComposerSheet(
+                timeRange: composeRange ?? defaultComposeRange,
+                initialTargets: composeTargets,
                 tracks: controller.tracks,
-                onClose: { activeSheet = nil }
+                controller: controller,
+                onSend: sendFeedback,
+                onCancel: { activeSheet = nil }
             )
             .presentationDetents([.large])
             .modifier(LargePageSheet())
@@ -804,13 +757,8 @@ struct StemPlayerView: View {
                 try await controller.startPatchRecording(target: track, region: region)
             } catch {
                 recordingTrackId = nil
-                recordingError = "녹음 시작 실패: \(error.localizedDescription)"
+                recordingError = L("녹음 시작 실패: \(error.localizedDescription)")
                 replyingToFeedbackId = nil
-                if recordingReference {
-                    // 시범 녹음이 안 되면 작성 중이던 피드백으로 돌아간다
-                    recordingReference = false
-                    activeSheet = .compose
-                }
             }
         }
     }
@@ -847,83 +795,23 @@ struct StemPlayerView: View {
 
     /// 지금 구간으로 새 피드백 작성을 시작한다. 선택된 트랙(헤더를 누른 세션)을 받는 사람으로 미리 고른다.
     private func startCompose() {
-        guard let region = controller.loopRegion else { return }
         practice.stop()
-        let preset = selectedTrackId.map { Set([$0]) } ?? []
-        composeDraft = FeedbackDraft(timeRange: region, targets: preset)
+        composeRange = defaultComposeRange
+        composeTargets = selectedTrackId.map { Set([$0]) } ?? []
         activeSheet = .compose
     }
 
-    private func sendDraft() {
-        guard let draft = composeDraft else { return }
-        let targets = controller.tracks.map(\.id).filter { draft.targets.contains($0) }
+    private func sendFeedback(_ feedback: ComposedFeedback) {
         let item = feedbackStore.addFeedback(
-            timeRange: draft.timeRange,
-            text: draft.text.trimmingCharacters(in: .whitespacesAndNewlines),
-            targetSessionIds: targets,
-            kind: draft.kind,
-            targetMix: draft.kind == .balance ? draft.targetMix : nil,
-            referencePatchId: draft.kind == .playing ? draft.referencePatchId : nil
+            timeRange: feedback.timeRange,
+            text: feedback.text,
+            targetSessionIds: controller.tracks.map(\.id).filter { feedback.targets.contains($0) },
+            kind: feedback.kind,
+            targetMix: feedback.targetMix,
+            translations: feedback.translations
         )
-        // 다른 종류로 바꿔서 보냈으면 녹음해 둔 시범은 버린다
-        if draft.kind != .playing { deleteDraftReference() }
         selectedFeedbackId = item.id
-        composeDraft = nil
         activeSheet = nil
-    }
-
-    private func cancelCompose() {
-        deleteDraftReference()
-        composeDraft = nil
-        activeSheet = nil
-    }
-
-    /// 받는 세션 트랙 자리에 리더가 시범을 녹음한다 (그 트랙은 끄고 나머지를 들으며).
-    private func recordReference(sessionId: String) {
-        guard let draft = composeDraft else { return }
-        activeSheet = nil
-        recordingReference = true
-        selectedTrackId = sessionId
-        controller.loopRegion = draft.timeRange
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            guard !controller.isRecording, controller.pendingRecording == nil else { return }
-            recordTapped()
-        }
-    }
-
-    private func saveReferenceRecording(for track: StemTrack) {
-        guard let pending = controller.pendingRecording, pending.trackId == track.id else { return }
-        do {
-            let patch = try patchStore.addPatch(sessionId: track.id, timeRange: pending.region,
-                                                tempFileURL: pending.tempURL, isReference: true)
-            controller.clearPendingRecording()
-            deleteDraftReference()
-            composeDraft?.referencePatchId = patch.id
-            recordingReference = false
-            activeSheet = .compose
-        } catch {
-            recordingError = "시범 저장 실패: \(error.localizedDescription)"
-        }
-    }
-
-    private func playDraftReference() {
-        guard let draft = composeDraft, let refId = draft.referencePatchId, let ref = patchStore.patch(id: refId),
-              let track = controller.tracks.first(where: { $0.id == ref.sessionId }) else { return }
-        comparedTrackIds.insert(track.id)
-        controller.activatePatch(ref, fileURL: patchStore.fileURL(for: ref), for: track)
-        controller.loopRegion = draft.timeRange
-        controller.isLoopEnabled = true
-        controller.seek(to: draft.timeRange.lowerBound)
-        if !controller.isPlaying { controller.play() }
-    }
-
-    private func deleteDraftReference() {
-        guard let refId = composeDraft?.referencePatchId, let ref = patchStore.patch(id: refId) else { return }
-        if let track = controller.tracks.first(where: { $0.id == ref.sessionId }) {
-            controller.deactivatePatch(ref.id, for: track)
-        }
-        patchStore.delete(ref)
-        composeDraft?.referencePatchId = nil
     }
 
     // MARK: - 받는 사람: 종류별 연습
@@ -998,7 +886,7 @@ struct StemPlayerView: View {
                 activeSheet = .thread(feedbackId)
             }
         } catch {
-            recordingError = "패치 저장 실패: \(error.localizedDescription)"
+            recordingError = L("패치 저장 실패: \(error.localizedDescription)")
         }
     }
 }

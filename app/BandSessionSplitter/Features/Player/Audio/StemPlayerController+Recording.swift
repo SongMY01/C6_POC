@@ -17,12 +17,12 @@ extension StemPlayerController {
         var errorDescription: String? {
             switch self {
             case .permissionDenied:
-                return "마이크 권한이 거부됨 — 설정 → 개인정보 보호 → 마이크에서 이 앱을 켜주세요."
+                return L("마이크 권한이 거부됨 — 설정 → 개인정보 보호 → 마이크에서 이 앱을 켜주세요.")
             case .inputUnavailable:
-                return "마이크 입력을 찾을 수 없음 (입력 포맷 샘플레이트 0)"
+                return L("마이크 입력을 찾을 수 없음 (입력 포맷 샘플레이트 0)")
             case let .step(name, error):
                 let ns = error as NSError
-                return "\(name) 단계 실패: \(ns.localizedDescription) [\(ns.domain) \(ns.code)]"
+                return L("\(name) 단계 실패: \(ns.localizedDescription) [\(ns.domain) \(ns.code)]")
             }
         }
     }
@@ -76,15 +76,15 @@ extension StemPlayerController {
             // 엔진이 돌고 있는 채로 카테고리를 바꾸면 그래프가 깨질 수 있어 잠깐 멈췄다 다시 시작한다.
             engine.stop()
             let session = AVAudioSession.sharedInstance()
-            try recordingStep("세션 카테고리 설정") {
+            try recordingStep(L("세션 카테고리 설정")) {
                 try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
             }
-            try recordingStep("세션 활성화") { try session.setActive(true) }
+            try recordingStep(L("세션 활성화")) { try session.setActive(true) }
             // inputNode는 처음 접근할 때 그래프에 추가된다. 엔진이 돌고 있을 때 처음 접근하면
             // 그래프가 재구성되며 시작이 꼬일 수 있어, 멈춘 상태에서 먼저 만들어 둔다.
             _ = engine.inputNode
             engine.prepare()
-            try recordingStep("엔진 재시작") { try engine.start() }
+            try recordingStep(L("엔진 재시작")) { try engine.start() }
             recordingSessionConfigured = true
         }
 
@@ -93,7 +93,7 @@ extension StemPlayerController {
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else { throw PatchRecordingError.inputUnavailable }
 
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("patch_rec_\(UUID().uuidString).caf")
-        let file = try recordingStep("녹음 파일 생성") {
+        let file = try recordingStep(L("녹음 파일 생성")) {
             try AVAudioFile(forWriting: tempURL, settings: inputFormat.settings)
         }
         recordingFile = file
