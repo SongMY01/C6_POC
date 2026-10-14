@@ -328,7 +328,8 @@ struct StemPlayerView: View {
                                         onMoveRegion: { controller.moveRegion($0, in: track, to: $1) },
                                         onTrimRegionStart: { controller.trimRegionStart($0, in: track, to: $1) },
                                         onTrimRegionEnd: { controller.trimRegionEnd($0, in: track, to: $1) },
-                                        feedbacks: feedbackStore.items.filter { $0.targetSessionIds.contains(track.id) },
+                                        // 전체 대상 피드백은 모든 트랙에 보인다
+                                        feedbacks: feedbackStore.items.filter { $0.isFor(sessionId: track.id) },
                                         selectedFeedbackId: selectedFeedbackId,
                                         onTapFeedbackCluster: { openCluster($0) }
                                     )
