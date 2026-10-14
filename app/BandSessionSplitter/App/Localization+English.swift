@@ -253,4 +253,6 @@ let englishStrings: [String: String] = [
     "카운트인 → 고른 느낌을 떠올리며 구간 반복": "Count-in → loop the section with the chosen feel in mind",
     "%@의 코멘트를 기다리는 중": "Waiting for a comment from %@",
     "이 피드백 구간을 준비 시간 2초 뒤부터 녹음합니다. 올리면 새 시도로 추가되고, 피드백을 준 %@에게 코멘트를 요청해요.": "Recording starts 2 seconds after you begin, over this feedback section. Uploading adds a new attempt and asks %@, who gave the feedback, for a comment.",
+    "코멘트 요청은 피드백 하나에 최대 %@번이에요. 더 맞출 부분은 다음 합주에서 같이 맞춰 봐요.": "Each feedback can request a comment up to %@ times. Work out the rest together at the next rehearsal.",
+    "남은 코멘트 요청: %@번": "Comment requests left: %@",
 ]

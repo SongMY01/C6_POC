@@ -103,6 +103,11 @@ struct FeedbackItem: Identifiable, Codable, Equatable {
     /// 지금 표시 언어에 맞는 문장 (번역이 없으면 쓴 그대로).
     var displayText: String { translations?[AppLanguage.current.rawValue] ?? text }
 
+    /// 피드백 1개당 코멘트 요청(= 녹음 시도)은 최대 2번: 처음 올리기 + 다시 연습 1번 (팀 규칙).
+    static let maxCommentRequests = 2
+    var remainingCommentRequests: Int { max(0, Self.maxCommentRequests - attempts.count) }
+    var canRequestComment: Bool { remainingCommentRequests > 0 }
+
     var plan: PracticePlan { (kind ?? .free).plan }
 
     var status: FeedbackStatus {
@@ -290,6 +295,7 @@ final class FeedbackStore: ObservableObject {
 
     /// 녹음을 새 시도로 올린다 → 코멘트 요청 상태. 통과했던 피드백이면 다시 열린다.
     func addAttempt(patch: Patch, to feedbackId: UUID) {
+        guard item(id: feedbackId)?.canRequestComment ?? false else { return }
         let attempt = FeedbackAttempt(sessionId: patch.sessionId, patchId: patch.id)
         update(feedbackId) {
             $0.attempts.append(attempt)

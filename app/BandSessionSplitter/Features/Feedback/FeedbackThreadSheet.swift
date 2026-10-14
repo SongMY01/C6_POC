@@ -351,7 +351,23 @@ struct FeedbackThreadSheet: View {
 
     // MARK: 새 시도 올리기
 
+    @ViewBuilder
     private var recordSection: some View {
+        if !item.canRequestComment {
+            Section {
+                Label(L("코멘트 요청은 피드백 하나에 최대 \(FeedbackItem.maxCommentRequests)번이에요. 더 맞출 부분은 다음 합주에서 같이 맞춰 봐요."),
+                      systemImage: "info.circle")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text(L("다시 연습해서 올리기"))
+            }
+        } else {
+            recordButtons
+        }
+    }
+
+    private var recordButtons: some View {
         Section {
             ForEach(replyingTracks) { track in
                 Button {
@@ -374,7 +390,7 @@ struct FeedbackThreadSheet: View {
         } header: {
             Text(item.attempts.isEmpty ? L("연습해서 올리기") : L("다시 연습해서 올리기"))
         } footer: {
-            Text(L("이 피드백 구간을 준비 시간 2초 뒤부터 녹음합니다. 올리면 새 시도로 추가되고, 피드백을 준 \(authorName)에게 코멘트를 요청해요."))
+            Text(L("이 피드백 구간을 준비 시간 2초 뒤부터 녹음합니다. 올리면 새 시도로 추가되고, 피드백을 준 \(authorName)에게 코멘트를 요청해요.") + " " + L("남은 코멘트 요청: \(item.remainingCommentRequests)번"))
         }
     }
 

@@ -823,7 +823,7 @@ struct StemPlayerView: View {
 
     /// 이 iPad에서 그 피드백에 녹음으로 답할 수 있는지 (받는 세션이거나 리더)
     private func canRecordAttempt(_ item: FeedbackItem) -> Bool {
-        DeviceRole.isLeader || item.isFor(sessionId: DeviceRole.current)
+        item.canRequestComment && (DeviceRole.isLeader || item.isFor(sessionId: DeviceRole.current))
     }
 
     /// 피드백 종류가 정한 방법으로 바로 연습을 시작한다.
