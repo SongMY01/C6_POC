@@ -120,6 +120,21 @@ def _apply(op: dict):
             f["comments"] = [c for c in f.get("comments", []) if c["id"] != p["commentId"]]
             for a in f.get("attempts", []):
                 a["comments"] = [c for c in a.get("comments", []) if c["id"] != p["commentId"]]
+    elif t == "conclusion.propose":
+        f = _feedback(p["feedbackId"])
+        if f is not None:
+            f["conclusion"] = p["conclusion"]
+    elif t == "conclusion.agree":
+        f = _feedback(p["feedbackId"])
+        c = f.get("conclusion") if f is not None else None
+        # 그사이 다른 제안으로 바뀌었으면 옛 제안에 대한 동의는 버린다
+        if c is not None and c.get("id") == p["conclusionId"] and p["by"] not in c.setdefault("agreedBy", []):
+            c["agreedBy"].append(p["by"])
+    elif t == "conclusion.clear":
+        f = _feedback(p["feedbackId"])
+        if f is not None:
+            f.pop("conclusion", None)
+            f.pop("passedAttemptId", None)
     elif t == "patch.upsert":
         patch = p["patch"]
         _state["patches"] = [x for x in _state["patches"] if x["id"] != patch["id"]] + [patch]

@@ -34,6 +34,20 @@ enum FeedbackKind: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    /// 결론이 나면 타임라인 핀에 뜨는 이모지 (흰 점 → 이 이모지).
+    var emoji: String {
+        switch self {
+        case .tempo: return "⏱️"
+        case .balance: return "🎚️"
+        case .harmony: return "🎶"
+        case .expression: return "🌊"
+        case .free: return "🤝"
+        case .dynamics: return "📢"
+        case .playing: return "🎵"
+        case .cue: return "✋"
+        }
+    }
+
     /// SF Symbol
     var icon: String {
         switch self {
