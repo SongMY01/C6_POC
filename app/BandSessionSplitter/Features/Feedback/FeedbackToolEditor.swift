@@ -1,23 +1,21 @@
 import SwiftUI
 
-// MARK: - 피드백 작성: 종류를 먼저 고르면, 그 종류에 맞는 입력창이 열린다
+// MARK: - 툴 편집기: 종류별 입력창으로 "보여 주고 들려 주는" 제안을 만든다
 //
-// 종류와 입력 방식은 화이트보드 회의(2026-10-14) 기준: 박자 · 볼륨·밸런스 · 하모니 · 표현 · 그 외(타이핑만).
-// 보낼 때 입력값으로 받는 사람용 문장을 한국어·영어 둘 다 만들어 저장한다 (앱 표시 언어에 따라 골라 보임).
+// 핀 대화에서 두 곳에 쓴다 (팀 결정 2026-10-15, 길버트 멘토링 반영):
+// - 대화 첨부: "이런 느낌 어때?" — 글 옆에 믹스·코드·박 표시를 붙여 다른 사람이 바로 듣고 비교한다.
+// - 결론 첨부: "이걸로 하자" — 합의한 값을 남기고, 정리되면 연습할 때 그 값을 쓴다 (예: 합의한 믹스로 구간 반복).
+// 종류는 대화 전에 고르는 양식이 아니라, 쓰고 싶을 때 여는 도구다.
+// 창을 따로 띄우지 않고 핀 패널의 입력 줄 위에 서랍처럼 펼쳐진다 (뎁스를 늘리지 않게).
+// 입력값으로 한 줄 요약을 한국어·영어 둘 다 만들어 둔다 (앱 표시 언어에 따라 골라 보임).
 
-/// 작성 화면이 만든 피드백. StemPlayerView가 FeedbackStore에 저장·동기화한다.
-struct ComposedFeedback {
-    let timeRange: ClosedRange<TimeInterval>
-    let kind: FeedbackKind
-    let targets: Set<String>
-    let text: String
-    let translations: [String: String]
-    /// 볼륨·밸런스: 받는 사람이 연습할 때 듣는 목표 믹스 (트랙 id → 볼륨 0~1)
-    let targetMix: [String: Float]?
-}
+extension FeedbackKind {
+    /// 툴로 쓸 수 있는 종류 (그 외는 글로만)
+    static let tools: [FeedbackKind] = [.tempo, .balance, .harmony, .expression]
 
-/// 작성 화면에서만 쓰는 종류별 모양·안내.
-private extension FeedbackKind {
+    /// 좁은 버튼에 쓰는 짧은 이름
+    var shortLabel: String { self == .balance ? L("믹스") : label }
+
     var hint: String {
         switch self {
         case .tempo: return L("빨라요 / 느려요")
@@ -37,41 +35,26 @@ private extension FeedbackKind {
         default: return .gray
         }
     }
-
-    /// 받는 사람이 "연습 시작"을 누르면 실제로 하게 되는 방법 (FeedbackKind.plan과 맞춘다)
-    var startingTip: String {
-        switch self {
-        case .tempo: return L("카운트인 → 80% · 90% · 100% 속도로 구간 반복")
-        case .balance: return L("목표 믹스로 구간 반복 · 지금 ↔ 목표 바꿔 듣기")
-        case .harmony: return L("카운트인 → 70% · 85% · 100% 속도로 구간 반복")
-        case .expression: return L("카운트인 → 고른 느낌을 떠올리며 구간 반복")
-        default: return L("구간 반복")
-        }
-    }
 }
 
-struct FeedbackComposerSheet: View {
+struct FeedbackToolEditor: View {
     let timeRange: ClosedRange<TimeInterval>
     let tracks: [StemTrack]
     /// 구간 듣기 · 볼륨·밸런스의 "고친 믹스" 듣기에 쓴다.
     @ObservedObject var controller: StemPlayerController
-    let onSend: (ComposedFeedback) -> Void
-    let onCancel: () -> Void
+    /// 입력이 바뀔 때마다 지금 값 (필수 입력이 안 채워졌으면 nil)
+    let onValue: (FeedbackToolValue?) -> Void
 
-    init(timeRange: ClosedRange<TimeInterval>, initialTargets: Set<String>, tracks: [StemTrack],
-         controller: StemPlayerController, onSend: @escaping (ComposedFeedback) -> Void, onCancel: @escaping () -> Void) {
+    @State private var kind: FeedbackKind
+
+    init(kind: FeedbackKind, timeRange: ClosedRange<TimeInterval>, tracks: [StemTrack],
+         controller: StemPlayerController, onValue: @escaping (FeedbackToolValue?) -> Void) {
         self.timeRange = timeRange
         self.tracks = tracks
         self.controller = controller
-        self.onSend = onSend
-        self.onCancel = onCancel
-        _targets = State(initialValue: initialTargets)
+        self.onValue = onValue
+        _kind = State(initialValue: kind)
     }
-
-    // 공통
-    @State private var targets: Set<String> = []
-    @State private var kind: FeedbackKind?
-    @State private var memo = ""
 
     // 박자
     /// 박마다 표시: 키 = 마디(0~3) × 4 + 박(0~3), 값 = 빨라요/느려요. 누를 때마다 빨라요 → 느려요 → 없음.
@@ -83,7 +66,7 @@ struct FeedbackComposerSheet: View {
     @State private var originalVolumes: [String: Float] = [:]
     /// 재녹음(패치) 구간 소리의 원래 볼륨 — 고친 믹스는 패치 소리에도 똑같이 적용한다.
     @State private var originalPatchVolumes: [String: Float] = [:]
-    /// 열기 전 구간반복 상태. 닫을 때 되돌린다 (작성 화면이 곡의 구간 설정을 바꿔 놓지 않게).
+    /// 열기 전 구간반복 상태. 닫을 때 되돌린다.
     @State private var savedLoop: (region: ClosedRange<TimeInterval>?, enabled: Bool)?
     @State private var fader: [String: Double] = [:]   // 파트별 0(묻힘) ~ 0.5(적당) ~ 1(튐). 건드린 파트만 들어 있다.
 
@@ -95,112 +78,52 @@ struct FeedbackComposerSheet: View {
     @State private var tones: Set<ToneStyle> = []
     @State private var referenceLink = ""
 
-    // 그 외: 타이핑만
-    @State private var otherText = ""
-
-
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    rangeAndTargets
-                    kindPicker
-                    if let kind {
-                        inputCard(for: kind)
-                        if kind != .free { commonInputs }
-                        recipientPreview(for: kind)
-                    }
-                }
-                .padding(20)
-                .frame(maxWidth: 760)
-                .frame(maxWidth: .infinity)
-            }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle(L("피드백 남기기"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(L("취소"), action: onCancel) }
-                ToolbarItem(placement: .principal) {
-                    Button(action: playRegion) {
-                        Label(controller.isPlaying ? L("멈춤") : L("구간 듣기"),
-                              systemImage: controller.isPlaying ? "pause.fill" : "play.fill")
-                            .labelStyle(.titleAndIcon)
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(L("보내기")) { if let feedback = composed() { onSend(feedback) } }.disabled(!isComplete)
-                }
-            }
-            .onAppear {
-                originalVolumes = Dictionary(uniqueKeysWithValues: tracks.map { ($0.id, $0.volume) })
-                originalPatchVolumes = Dictionary(uniqueKeysWithValues: tracks.map { ($0.id, $0.patchVolume) })
-                savedLoop = (controller.loopRegion, controller.isLoopEnabled)
-            }
-            .onDisappear {
-                controller.pause()
-                restoreVolumes()
-                if let savedLoop {
-                    controller.loopRegion = savedLoop.region
-                    controller.isLoopEnabled = savedLoop.enabled
-                }
-            }
-            .onChange(of: fader) { _, _ in applyHearing() }
-            .onChange(of: hearingFixed) { _, _ in applyHearing() }
-            .onChange(of: kind) { _, _ in applyHearing() }
+        VStack(alignment: .leading, spacing: 12) {
+            kindSwitcher
+            inputCard(for: kind)
         }
-    }
-
-    // MARK: 위쪽
-
-    private var rangeAndTargets: some View {
-        card {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Label("\(formatTime(timeRange.lowerBound)) ~ \(formatTime(timeRange.upperBound))", systemImage: "scope")
-                        .font(.headline.monospacedDigit())
-                    Spacer()
-                    Text(L("지금 잡힌 구간")).font(.caption).foregroundStyle(.secondary)
-                }
-                Divider()
-                Text(L("받는 세션")).font(.subheadline.weight(.semibold))
-                ChipFlow(spacing: 8) {
-                    chip(L("👥 전체"), isOn: targets.isEmpty) { targets.removeAll() }
-                    ForEach(tracks) { track in
-                        chip("\(track.instrumentEmoji) \(track.displayName)", isOn: targets.contains(track.id)) {
-                            toggle(&targets, track.id)
-                        }
-                    }
-                }
+        .onAppear {
+            originalVolumes = Dictionary(uniqueKeysWithValues: tracks.map { ($0.id, $0.volume) })
+            originalPatchVolumes = Dictionary(uniqueKeysWithValues: tracks.map { ($0.id, $0.patchVolume) })
+            savedLoop = (controller.loopRegion, controller.isLoopEnabled)
+            report()
+        }
+        .onDisappear {
+            restoreVolumes()
+            if let savedLoop {
+                controller.loopRegion = savedLoop.region
+                controller.isLoopEnabled = savedLoop.enabled
             }
         }
+        .onChange(of: fader) { _, _ in applyHearing(); report() }
+        .onChange(of: hearingFixed) { _, _ in applyHearing() }
+        .onChange(of: kind) { _, _ in applyHearing(); report() }
+        .onChange(of: beatMarks) { _, _ in report() }
+        .onChange(of: chords) { _, _ in report() }
+        .onChange(of: exprSymbol) { _, _ in report() }
+        .onChange(of: tones) { _, _ in report() }
+        .onChange(of: referenceLink) { _, _ in report() }
     }
 
-    private var kindPicker: some View {
-        card {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text(L("어떤 피드백이에요?")).font(.headline)
-                    Spacer()
-                    if kind == nil { Text(L("먼저 종류를 골라 주세요")).font(.caption).foregroundStyle(.secondary) }
+    private func report() { onValue(value()) }
+
+    private var kindSwitcher: some View {
+        HStack(spacing: 8) {
+            ForEach(FeedbackKind.tools) { item in
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { kind = item }
+                } label: {
+                    Text("\(item.emoji) \(item.shortLabel)")
+                        .font(.subheadline.weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(kind == item ? Color.white : item.color)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(kind == item ? item.color : item.color.opacity(0.15)))
                 }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
-                    ForEach(FeedbackKind.composable) { item in
-                        Button {
-                            withAnimation(.easeOut(duration: 0.15)) { kind = item }
-                        } label: {
-                            VStack(spacing: 6) {
-                                Image(systemName: item.icon).font(.title2)
-                                Text(item.label).font(.subheadline.weight(.bold))
-                                Text(item.hint).font(.caption2).opacity(0.75)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .foregroundStyle(kind == item ? Color.white : item.color)
-                            .background(RoundedRectangle(cornerRadius: 12).fill(kind == item ? item.color : item.color.opacity(0.12)))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -218,8 +141,7 @@ struct FeedbackComposerSheet: View {
                 case .tempo: tempoInput
                 case .balance: mixInput
                 case .harmony: harmonyInput
-                case .expression: toneInput
-                default: otherInput
+                default: toneInput
                 }
             }
         }
@@ -281,7 +203,7 @@ struct FeedbackComposerSheet: View {
     // 볼륨·밸런스: 파트별 페이더 한 화면. 왼쪽 묻힘 ↔ 가운데 적당 ↔ 오른쪽 튐. 건드린 파트만 전송된다.
     private var mixInput: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("\(formatTime(timeRange.lowerBound))~\(formatTime(timeRange.upperBound)) · \(recipientsLabel)")
+            Text("\(formatTime(timeRange.lowerBound))~\(formatTime(timeRange.upperBound))")
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 10).padding(.vertical, 4)
                 .background(Capsule().fill(Color.secondary.opacity(0.14)))
@@ -372,7 +294,7 @@ struct FeedbackComposerSheet: View {
     private var toneInput: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(L("기호 타일 고르기")).font(.subheadline.weight(.semibold))
-            Text("\(formatTime(timeRange.lowerBound))~\(formatTime(timeRange.upperBound)) · \(recipientsLabel)")
+            Text("\(formatTime(timeRange.lowerBound))~\(formatTime(timeRange.upperBound))")
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 10).padding(.vertical, 4)
                 .background(Capsule().fill(Color.secondary.opacity(0.14)))
@@ -406,86 +328,7 @@ struct FeedbackComposerSheet: View {
         }
     }
 
-    // 그 외: 타이핑만
-    private var otherInput: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            TextField(L("내용을 입력하세요"), text: $otherText, axis: .vertical)
-                .lineLimit(4...8)
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.1)))
-            Label(L("종류에 맞지 않는 피드백은 글로만 남겨요"), systemImage: "info.circle")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: 공통 입력 (한 줄 메모 · 음성 메모)
-
-    private var commonInputs: some View {
-        card {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(L("덧붙이기 (선택)")).font(.subheadline.weight(.semibold))
-                TextField(L("한 줄 메모"), text: $memo)
-                    .padding(10)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.1)))
-            }
-        }
-    }
-
-    // MARK: 받는 사람 화면 미리보기
-
-    private func recipientPreview(for kind: FeedbackKind) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L("받는 사람에게는 이렇게 보여요")).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: kind.icon).foregroundStyle(.white)
-                        .frame(width: 30, height: 30)
-                        .background(Circle().fill(kind.color))
-                    Text("\(formatTime(timeRange.lowerBound)) ~ \(formatTime(timeRange.upperBound))")
-                        .font(.subheadline.monospacedDigit().weight(.semibold))
-                    Text("→ \(recipientsLabel)").font(.subheadline).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(kind.label).font(.caption2.weight(.bold))
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Capsule().fill(kind.color.opacity(0.18))).foregroundStyle(kind.color)
-                }
-                Text(summary(for: kind)).font(.body.weight(.medium))
-                if kind == .expression && (exprSymbol != nil || !tones.isEmpty) {
-                    // 기호를 모르는 사람도 보게, 받는 화면에도 그림을 같이 보여 준다
-                    HStack(spacing: 16) {
-                        if let exprSymbol { ExprSymbolShape(symbol: exprSymbol).frame(height: 32) }
-                        ForEach(ToneStyle.allCases.filter(tones.contains)) { ToneWave(style: $0) }
-                    }
-                    .foregroundStyle(kind.color)
-                }
-                if !memo.isEmpty { Text("“\(memo)”").font(.callout).foregroundStyle(.secondary) }
-                Divider()
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "lightbulb.fill").foregroundStyle(.yellow)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L("이렇게 시작해 보세요")).font(.caption.weight(.bold))
-                        Text(kind.startingTip).font(.footnote)
-                    }
-                }
-                HStack {
-                    Spacer()
-                    Text(L("▶ 바로 해보기")).font(.footnote.weight(.bold))
-                        .padding(.horizontal, 14).padding(.vertical, 7)
-                        .background(Capsule().fill(kind.color.opacity(0.18))).foregroundStyle(kind.color)
-                }
-            }
-            .padding(14)
-            .background(RoundedRectangle(cornerRadius: 14).fill(Color(uiColor: .systemBackground)))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(kind.color.opacity(0.5), lineWidth: 1.5))
-        }
-    }
-
-    // MARK: 요약 문장 (입력값으로 만들어짐)
-
-    private var recipientsLabel: String {
-        if targets.isEmpty { return L("전체") }
-        return tracks.filter { targets.contains($0.id) }.map(\.displayName).joined(separator: ", ")
-    }
+    // MARK: 요약
 
     private func summary(for kind: FeedbackKind) -> String {
         switch kind {
@@ -518,45 +361,40 @@ struct FeedbackComposerSheet: View {
             if !tones.isEmpty { parts.append(L("톤: \(ToneStyle.allCases.filter(tones.contains).map(\.label).joined(separator: ", "))")) }
             return parts.isEmpty ? L("기호 타일이나 톤을 골라 주세요.") : parts.joined(separator: " ")
         default:
-            let text = otherText.trimmingCharacters(in: .whitespacesAndNewlines)
-            return text.isEmpty ? L("내용을 적어 주세요.") : text
+            return ""
         }
     }
 
-    /// 보내기 전에 필수 입력이 채워졌는지 (종류마다 다름).
+    /// 필수 입력이 채워졌는지 (종류마다 다름).
     private var isComplete: Bool {
         switch kind {
-        case nil: return false
         case .tempo: return !beatMarks.isEmpty
         case .balance: return !fader.isEmpty
         case .harmony: return chords.contains { $0 != nil }
         case .expression: return exprSymbol != nil || !tones.isEmpty
-        default: return !otherText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        default: return false
         }
     }
 
-    // MARK: 보내기
-
-    /// 입력값으로 저장할 피드백을 만든다. 문장은 한국어·영어 둘 다 만들고, 지금 언어 쪽을 원문으로 둔다.
-    private func composed() -> ComposedFeedback? {
-        guard let kind, isComplete else { return nil }
-        func fullText() -> String {
+    /// 입력값으로 붙일 툴 값을 만든다. 요약 문장은 한국어·영어 둘 다.
+    private func value() -> FeedbackToolValue? {
+        guard isComplete else { return nil }
+        func fullSummary() -> String {
             var lines = [summary(for: kind)]
-            let note = memo.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !note.isEmpty { lines.append("“\(note)”") }
             let link = referenceLink.trimmingCharacters(in: .whitespacesAndNewlines)
             if kind == .expression, !link.isEmpty { lines.append("🔗 \(link)") }
             return lines.joined(separator: "\n")
         }
-        let korean = AppLanguage.with(.korean, fullText)
-        let english = AppLanguage.with(.english, fullText)
-        return ComposedFeedback(
-            timeRange: timeRange,
+        let link = referenceLink.trimmingCharacters(in: .whitespacesAndNewlines)
+        return FeedbackToolValue(
             kind: kind,
-            targets: targets,
-            text: AppLanguage.isEnglish ? english : korean,
-            translations: ["ko": korean, "en": english],
-            targetMix: kind == .balance ? fixedMix() : nil
+            beatMarks: kind == .tempo ? Dictionary(uniqueKeysWithValues: beatMarks.map { (String($0.key), $0.value.rawValue) }) : nil,
+            targetMix: kind == .balance ? fixedMix() : nil,
+            chords: kind == .harmony ? chords.map { $0 ?? "" } : nil,
+            expression: kind == .expression ? exprSymbol?.rawValue : nil,
+            tones: kind == .expression && !tones.isEmpty ? ToneStyle.allCases.filter(tones.contains).map(\.rawValue) : nil,
+            link: kind == .expression && !link.isEmpty ? link : nil,
+            summaries: ["ko": AppLanguage.with(.korean, fullSummary), "en": AppLanguage.with(.english, fullSummary)]
         )
     }
 
@@ -632,17 +470,6 @@ struct FeedbackComposerSheet: View {
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(accent?.opacity(0.5) ?? .clear, lineWidth: 1.5))
     }
 
-    private func chip(_ text: String, isOn: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(text)
-                .font(.subheadline.weight(.semibold))
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(Capsule().fill(isOn ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.14)))
-                .overlay(Capsule().stroke(isOn ? Color.accentColor : .clear, lineWidth: 1.5))
-        }
-        .buttonStyle(.plain)
-    }
-
     /// 이모지·기호가 위에 있고 이름이 아래에 있는 선택 타일 (표현·밸런스 공용).
     private func tile<Symbol: View>(label: String, color: Color, isOn: Bool,
                                     @ViewBuilder symbol: () -> Symbol, action: @escaping () -> Void) -> some View {
@@ -658,10 +485,11 @@ struct FeedbackComposerSheet: View {
         }
         .buttonStyle(.plain)
     }
+
 }
 
 /// 박자 격자에서 박 하나에 붙이는 표시.
-private enum BeatMark: CaseIterable {
+enum BeatMark: String, CaseIterable {
     case rushing, dragging
 
     var label: String { self == .rushing ? L("빨라요") : L("느려요") }
@@ -670,8 +498,84 @@ private enum BeatMark: CaseIterable {
     var color: Color { self == .rushing ? .orange : .blue }
 }
 
+/// 대화·결론에 붙은 툴을 보여 주는 카드. 믹스는 "이 믹스로 듣기"로 바로 들어 볼 수 있다.
+struct FeedbackToolCard: View {
+    let tool: FeedbackToolValue
+    let tracks: [StemTrack]
+    /// 지금 이 믹스로 듣는 중인지 (볼륨·밸런스만)
+    var isHearingMix = false
+    /// nil이면 듣기 버튼을 숨긴다
+    var onHearMix: ((Bool) -> Void)?
+    /// 요약 문장을 보여줄지 (바로 위에 같은 문장이 있으면 끈다)
+    var showsSummary = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(tool.kind.emoji)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(tool.kind.color.opacity(0.2)))
+                Text(tool.kind.label).font(.caption.weight(.bold)).foregroundStyle(tool.kind.color)
+                Spacer()
+                if tool.targetMix != nil, let onHearMix {
+                    Button {
+                        onHearMix(!isHearingMix)
+                    } label: {
+                        Label(isHearingMix ? L("원래 믹스로") : L("이 믹스로 듣기"),
+                              systemImage: isHearingMix ? "arrow.uturn.backward" : "slider.vertical.3")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(tool.kind.color)
+                }
+            }
+            if showsSummary { Text(tool.displaySummary).font(.subheadline.weight(.medium)) }
+            if let chords = tool.chords, chords.contains(where: { !$0.isEmpty }) {
+                HStack(spacing: 6) {
+                    ForEach(Array(chords.enumerated()), id: \.offset) { _, chord in
+                        Text(chord.isEmpty ? "–" : chord)
+                            .font(.headline)
+                            .frame(minWidth: 44, minHeight: 36)
+                            .foregroundStyle(tool.kind.color)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(tool.kind.color.opacity(0.14)))
+                    }
+                }
+            }
+            let symbol = tool.expression.flatMap(ExprSymbol.init(rawValue:))
+            let tones = (tool.tones ?? []).compactMap(ToneStyle.init(rawValue:))
+            if symbol != nil || !tones.isEmpty {
+                HStack(spacing: 16) {
+                    if let symbol { ExprSymbolShape(symbol: symbol).frame(height: 28) }
+                    ForEach(tones) { ToneWave(style: $0) }
+                }
+                .foregroundStyle(tool.kind.color)
+            }
+            if let marks = tool.beatMarks, !marks.isEmpty {
+                beatGrid(marks)
+            }
+        }
+    }
+
+    /// 박 표시를 4마디 × 4박 작은 격자로
+    private func beatGrid(_ marks: [String: String]) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(0..<4, id: \.self) { measure in
+                HStack(spacing: 3) {
+                    ForEach(0..<4, id: \.self) { beat in
+                        let mark = marks[String(measure * 4 + beat)].flatMap(BeatMark.init(rawValue:))
+                        Image(systemName: mark?.icon ?? "circle")
+                            .font(.caption2.weight(.bold))
+                            .frame(width: 26, height: 18)
+                            .foregroundStyle(mark == nil ? Color.secondary.opacity(0.4) : .white)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(mark?.color ?? Color.secondary.opacity(0.1)))
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// 톤 타일: 소리의 느낌을 파형 모양으로 보여 준다.
-private enum ToneStyle: String, CaseIterable, Identifiable {
+enum ToneStyle: String, CaseIterable, Identifiable {
     case bright, dark, warm, sharp, clean, gritty
 
     var id: String { rawValue }
@@ -703,7 +607,7 @@ private enum ToneStyle: String, CaseIterable, Identifiable {
     var lineWidth: CGFloat { self == .dark ? 4 : 2.5 }
 }
 
-private struct ToneWave: View {
+struct ToneWave: View {
     let style: ToneStyle
 
     var body: some View {
@@ -721,7 +625,7 @@ private struct ToneWave: View {
 }
 
 /// 표현 타일에 쓰는 악보 기호. 이름은 악보를 모르는 사람도 알아듣는 말로 붙였다.
-private enum ExprSymbol: String, CaseIterable, Identifiable {
+enum ExprSymbol: String, CaseIterable, Identifiable {
     case staccato, slur, accent, tenuto, crescendo, decrescendo
 
     var id: String { rawValue }
@@ -739,7 +643,7 @@ private enum ExprSymbol: String, CaseIterable, Identifiable {
 }
 
 /// 악보 기호를 그림 그대로 그린다 (스타카토 점, 슬러 호, 악센트, 테누토 선, 크레셴도·디크레셴도).
-private struct ExprSymbolShape: View {
+struct ExprSymbolShape: View {
     let symbol: ExprSymbol
 
     var body: some View {
@@ -773,46 +677,5 @@ private struct ExprSymbolShape: View {
         }
         .stroke(style: StrokeStyle(lineWidth: flipped ? 4 : 3, lineCap: .round, lineJoin: .round))
         .frame(width: width, height: spread * 2)
-    }
-}
-
-/// 칩을 가로로 채우고 넘치면 다음 줄로 넘기는 레이아웃.
-private struct ChipFlow: Layout {
-    var spacing: CGFloat = 8
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
-        return CGSize(width: proposal.width ?? (rows.map(\.width).max() ?? 0),
-                      height: rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(0, rows.count - 1)))
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var y = bounds.minY
-        for row in arrange(width: bounds.width, subviews: subviews) {
-            var x = bounds.minX
-            for index in row.indices {
-                let size = subviews[index].sizeThatFits(.unspecified)
-                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-                x += size.width + spacing
-            }
-            y += row.height + spacing
-        }
-    }
-
-    private struct Row { var indices: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
-
-    private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
-        var rows = [Row()]
-        for index in subviews.indices {
-            let size = subviews[index].sizeThatFits(.unspecified)
-            let needed = rows[rows.count - 1].indices.isEmpty ? size.width : rows[rows.count - 1].width + spacing + size.width
-            if needed > width, !rows[rows.count - 1].indices.isEmpty { rows.append(Row()) }
-            var row = rows[rows.count - 1]
-            row.width = row.indices.isEmpty ? size.width : row.width + spacing + size.width
-            row.height = max(row.height, size.height)
-            row.indices.append(index)
-            rows[rows.count - 1] = row
-        }
-        return rows
     }
 }

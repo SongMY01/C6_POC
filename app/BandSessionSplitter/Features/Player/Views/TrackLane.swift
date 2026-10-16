@@ -25,10 +25,21 @@ struct TrackLane: View {
     let onTrimRegionStart: (UUID, TimeInterval) -> Void
     let onTrimRegionEnd: (UUID, TimeInterval) -> Void
 
-    /// 이 세션이 받는 피드백 (전체 대상 포함).
+    /// 이 줄에 꽂힌 핀 (전체 대상 포함).
     let feedbacks: [FeedbackItem]
     let selectedFeedbackId: UUID?
     let onTapFeedbackCluster: (FeedbackCluster) -> Void
+
+    /// 길게 눌러 끌고 있는 새 핀 구간 (이 줄일 때만)
+    let pinDraft: ClosedRange<TimeInterval>?
+    /// 길게 누른 뒤 끄는 동안 — 이 줄에 핀을 꽂을 구간
+    let onPinDrag: (ClosedRange<TimeInterval>) -> Void
+    /// 손을 뗐을 때 (마지막으로 넘긴 구간에 핀을 꽂는다)
+    let onPinRelease: () -> Void
+
+    /// 핀 구간을 끄는 중인지. 스크롤 안에서는 손을 떼도 제스처가 "끝남" 대신 "취소"로 끝날 때가 있어서,
+    /// 이 값이 꺼지는 순간을 손을 뗀 것으로 본다.
+    @GestureState private var isPinDragging = false
 
     /// 말풍선 최대 폭. 겹치는 피드백은 아래 줄로 쌓고, maxMarkerRows줄을 넘으면 "💬 N개"로 묶는다.
     private let feedbackMarkerWidth: CGFloat = 180
@@ -53,11 +64,26 @@ struct TrackLane: View {
                 patchClip(patch)
             }
 
+            if let pinDraft {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.white.opacity(0.22))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white, lineWidth: 2))
+                    .frame(width: max(4, CGFloat(pinDraft.upperBound - pinDraft.lowerBound) * pxPerSec), height: height - 6)
+                    .offset(x: CGFloat(pinDraft.lowerBound) * pxPerSec, y: 3)
+                    .allowsHitTesting(false)
+            }
+
             ForEach(FeedbackCluster.stacked(feedbacks, pxPerSec: pxPerSec, markerWidth: feedbackMarkerWidth, maxRows: maxMarkerRows)) { cluster in
                 feedbackMarker(cluster)
             }
         }
         .frame(width: width)
+        .contentShape(Rectangle())
+        // 꾹 눌렀다가 옆으로 끌면 이 줄에 핀을 꽂을 구간이 잡힌다 (짧게 끌면 스크롤, 탭은 리전 선택 그대로).
+        .simultaneousGesture(pinGesture)
+        .onChange(of: isPinDragging) { wasDragging, dragging in
+            if wasDragging && !dragging { onPinRelease() }
+        }
         .overlay(alignment: .bottom) { Rectangle().fill(Color.black.opacity(0.6)).frame(height: 1) }
         .clipped()
         .task(id: track.id) {
@@ -153,33 +179,51 @@ struct TrackLane: View {
 }
 
 extension TrackLane {
-    /// 피드백 구간 위쪽에 붙는 말풍선. 묶음이면 개수, 녹음 답변이 코멘트를 기다리면 파란색.
+    /// 길게 누른 뒤 끌기 → 핀 구간. 거의 안 끌었으면 누른 곳부터 4초.
+    fileprivate var pinGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.4)
+            .sequenced(before: DragGesture(minimumDistance: 0))
+            .updating($isPinDragging) { value, state, _ in
+                if case .second(true, _?) = value { state = true }
+            }
+            .onChanged { value in
+                guard case .second(true, let drag?) = value else { return }
+                onPinDrag(pinRange(from: drag.startLocation.x, to: drag.location.x))
+            }
+    }
+
+    fileprivate func pinRange(from x0: CGFloat, to x1: CGFloat) -> ClosedRange<TimeInterval> {
+        let total = TimeInterval(width / pxPerSec)
+        var a = TimeInterval(max(0, min(x0, x1)) / pxPerSec)
+        var b = TimeInterval(max(x0, x1) / pxPerSec)
+        if b - a < 0.5 { b = a + 4 }
+        b = min(b, total)
+        a = min(a, max(0, b - 0.5))
+        return a...b
+    }
+
+    /// 핀 말풍선: 이야기 중 = 흰 점, 결론 제안 = 노란 점, 정리됨 = 결론 이모지. 묶음이면 개수.
     fileprivate func feedbackMarker(_ cluster: FeedbackCluster) -> some View {
         let isSel = cluster.items.contains { $0.id == selectedFeedbackId }
-        let fill: Color = isSel ? .white : cluster.status.timelineColor
         return Button { onTapFeedbackCluster(cluster) } label: {
-            HStack(spacing: 4) {
-                Image(systemName: {
-                    switch cluster.status {
-                    case .awaitingComment: return "waveform.badge.mic"
-                    case .passed: return "checkmark.circle.fill"
-                    case .needsPractice: return "text.bubble.fill"
-                    }
-                }())
+            HStack(spacing: 5) {
                 if cluster.isSingle {
                     let item = cluster.items[0]
-                    Text(item.status == .needsPractice ? item.displayText : "\(item.status.label) · \(item.displayText)")
+                    FeedbackPinDot(item: item, size: 16)
+                    Text(item.status == .concluded ? (item.conclusion?.text ?? item.displayText) : item.displayText)
                         .lineLimit(1)
                 } else {
-                    Text(L("피드백 \(cluster.items.count)개"))
+                    Circle().fill(cluster.status.timelineColor).frame(width: 11, height: 11)
+                    Text(L("핀 \(cluster.items.count)개"))
                 }
             }
             .font(.system(size: 11, weight: .semibold))
             .frame(maxWidth: feedbackMarkerWidth - 24, alignment: .leading)
-            .foregroundStyle(Color.black)
+            .foregroundStyle(Color.white)
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
-            .background(Capsule().fill(fill))
+            .background(Capsule().fill(Color.black.opacity(0.55)))
+            .overlay(Capsule().stroke(isSel ? Color.white : cluster.status.timelineColor.opacity(0.6), lineWidth: isSel ? 2 : 1))
         }
         .buttonStyle(.plain)
         .offset(x: CGFloat(cluster.start) * pxPerSec, y: 26 + CGFloat(cluster.row) * 28)
